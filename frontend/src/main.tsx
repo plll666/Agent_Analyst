@@ -1,7 +1,12 @@
+import '@fontsource-variable/inter'
+import '@fontsource-variable/jetbrains-mono'
+import './index.css'
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
-import './index.css'
+import { App } from './app/App'
+import { isMockApiEnabled } from './lib/env'
 
 const container = document.getElementById('root')
 
@@ -9,13 +14,17 @@ if (container === null) {
   throw new Error('В index.html нет элемента с id="root"')
 }
 
-createRoot(container).render(
-  <StrictMode>
-    <main className="p-8">
-      <h1 className="text-2xl font-semibold">Agent Analyst</h1>
-      <p className="mt-2 text-gray-600">
-        Трек agent analyst: текст требований → формальная модель → проверка → объяснение.
-      </p>
-    </main>
-  </StrictMode>,
-)
+const bootstrap = async (): Promise<void> => {
+  if (isMockApiEnabled) {
+    const { startMockServer } = await import('./mocks/startMockServer')
+    await startMockServer()
+  }
+
+  createRoot(container).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+}
+
+void bootstrap()

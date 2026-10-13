@@ -1,1 +1,185 @@
 @import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --color-canvas: oklch(0.152 0.004 256);
+  --color-canvas-deep: oklch(0.112 0.004 256);
+  --color-surface: oklch(0.194 0.004 256);
+  --color-raised: oklch(0.236 0.005 256);
+  --color-overlay: oklch(0.281 0.005 256);
+  --color-line: oklch(0.318 0.005 256);
+  --color-line-strong: oklch(0.432 0.006 256);
+
+  --color-bone: oklch(0.963 0.009 92);
+  --color-bone-soft: oklch(0.276 0.008 92);
+  --color-ink: oklch(0.152 0.004 256);
+
+  --color-fg: oklch(0.952 0.007 92);
+  --color-muted: oklch(0.742 0.006 92);
+  --color-subtle: oklch(0.586 0.007 92);
+
+  --color-success: oklch(0.735 0.085 158);
+  --color-warning: oklch(0.79 0.08 86);
+  --color-danger: oklch(0.681 0.105 25);
+  --color-surface-success: oklch(0.235 0.022 158);
+  --color-surface-danger: oklch(0.235 0.026 25);
+
+  --color-grid-line: oklch(1 0 0 / 0.035);
+  --color-halo: oklch(0.963 0.009 92 / 0.08);
+
+  --radius-field: 0.75rem;
+  --radius-card: 1rem;
+  --radius-panel: 1.25rem;
+
+  --shadow-card: 0 1px 0 0 oklch(1 0 0 / 0.04) inset, 0 18px 40px -30px oklch(0 0 0 / 0.9);
+  --shadow-panel: 0 1px 0 0 oklch(1 0 0 / 0.05) inset, 0 44px 90px -50px oklch(0 0 0 / 0.95);
+  --shadow-glow: 0 12px 36px -20px oklch(0.963 0.009 92 / 0.4);
+
+  --text-display: clamp(2.25rem, 1.2rem + 4.4vw, 3.75rem);
+  --text-title: clamp(1.25rem, 1.05rem + 0.9vw, 1.625rem);
+  --text-micro: 0.6875rem;
+  --text-mono-body: 0.8125rem;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --color-canvas: oklch(0.978 0.003 92);
+  --color-canvas-deep: oklch(0.942 0.006 92);
+  --color-surface: oklch(0.996 0.001 92);
+  --color-raised: oklch(0.962 0.004 92);
+  --color-overlay: oklch(0.922 0.006 92);
+  --color-line: oklch(0.852 0.007 92);
+  --color-line-strong: oklch(0.72 0.009 92);
+
+  --color-bone: oklch(0.222 0.008 256);
+  --color-bone-soft: oklch(0.925 0.008 92);
+  --color-ink: oklch(0.986 0.002 92);
+
+  --color-fg: oklch(0.226 0.008 256);
+  --color-muted: oklch(0.436 0.012 256);
+  --color-subtle: oklch(0.468 0.012 256);
+
+  --color-success: oklch(0.512 0.104 158);
+  --color-warning: oklch(0.556 0.104 78);
+  --color-danger: oklch(0.532 0.164 25);
+  --color-surface-success: oklch(0.952 0.032 158);
+  --color-surface-danger: oklch(0.956 0.028 25);
+
+  --color-grid-line: oklch(0.22 0.01 90 / 0.05);
+  --color-halo: oklch(0.22 0.01 90 / 0.055);
+
+  --shadow-card: 0 1px 2px oklch(0.22 0.01 90 / 0.04), 0 10px 26px -20px oklch(0.22 0.01 90 / 0.22);
+  --shadow-panel:
+    0 1px 2px oklch(0.22 0.01 90 / 0.05), 0 28px 64px -34px oklch(0.22 0.01 90 / 0.28);
+  --shadow-glow: 0 10px 26px -16px oklch(0.22 0.01 90 / 0.3);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background-color: var(--color-canvas);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--color-bone);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-bone);
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+
+  input,
+  textarea,
+  button {
+    font: inherit;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-line);
+    background-clip: content-box;
+    border: 2px solid transparent;
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-line-strong);
+  }
+}
+
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, var(--color-grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+@utility bg-halo {
+  background-image:
+    radial-gradient(58rem 38rem at 12% 6%, var(--color-halo), transparent 62%),
+    radial-gradient(46rem 34rem at 88% 16%, var(--color-halo), transparent 60%),
+    radial-gradient(40rem 30rem at 52% 104%, var(--color-halo), transparent 62%);
+}
+
+@utility bg-fade-bottom {
+  background-image: linear-gradient(to bottom, var(--color-canvas), var(--color-canvas-deep));
+}
+
+@utility panel {
+  background-color: color-mix(in oklab, var(--color-surface) 74%, transparent);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+@utility text-gradient {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-bone) 4%,
+    var(--color-fg) 42%,
+    var(--color-muted) 96%
+  );
+  background-clip: text;
+  color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
