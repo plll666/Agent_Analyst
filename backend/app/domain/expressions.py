@@ -1,23 +1,3 @@
-"""DSL выражений и эффектов поведенческой модели.
-
-Формат, который пересекает границу LLM / движок, одноключевой — как в кейсе:
-``{"eq": [{"var": "status"}, "Created"]}``, ``{"set": ["status", "Approved"]}``.
-Внутри это теговый union по полю ``op``, но наружу сериализуется ровно в кейсовый вид:
-кейс, JSONB и генератор TLA+ должны видеть одно и то же, иначе на границе появится
-переводчик, который придётся поддерживать в двух местах.
-
-На вход принимаются оба вида — одноключевой кейсовый и теговый ``{"op": ..., ...}``.
-Второй нужен не пользователю, а схеме: дискриминируемый union разворачивается в JSON
-Schema с ``oneOf`` и перечислением операторов, и именно её агент видит при
-schema-constrained вызове. Отдаём при этом всегда кейсовый вид.
-
-Состав операторов зафиксирован разделом 8.2 ``API_CONTRACT.md``: ``var``, ``and``,
-``eq``, ``in``. Фронт раскрашивает выражения в читаемый вид, и расширение на ``not``,
-``neq`` или арифметику требует правки контракта с его стороны — см. там же примечание
-про расширение DSL. Отсюда и короткий список: оператор, которого нет в контракте,
-модель принять не должна.
-"""
-
 from __future__ import annotations
 
 import re
@@ -114,17 +94,6 @@ VarName = Annotated[str, StringConstraints(pattern=VAR_NAME_PATTERN.pattern)]
 
 
 def _reject_reserved(value: str) -> str:
-    """Отвергнуть имя, которое занято оператором DSL, ключевым словом TLA+ или Python.
-
-    Args:
-        value: проверенное на синтаксис имя.
-
-    Returns:
-        То же имя.
-
-    Raises:
-        ValueError: если имя зарезервировано.
-    """
     if value.lower() in RESERVED_NAMES:
         raise ValueError(
             f"имя {value!r} зарезервировано: оно совпадает с оператором DSL, "
@@ -139,27 +108,11 @@ Scalar = StrictStr | StrictBool | StrictInt
 
 _INTERNAL_FIELDS = frozenset({"op", "name", "args", "value", "members"})
 
-_WIRE_PAYLOAD_FIELD = {
-    "var": "name",
-    "and": "args",
-    "eq": "args",
-    "in": "in_args",
-}
+_WIRE_PAYLOAD_FIELD = {"var": "name", "and": "args", "eq": "args", "in": "in_args"}
 
 
 def from_wire(value: Any) -> Any:
-    """Привести одноключевой кейсовый вид выражения к теговому.
-
-    Args:
-        value: значение поля — словарь выражения, уже теговый вид или что-то неожиданное.
-
-    Returns:
-        Словарь с полем ``op``, если вход был одноключевым; иначе вход без изменений,
-        чтобы его отвергли уже сами модели операторов.
-
-    Raises:
-        ValueError: если ключей не один или оператор неизвестен.
-    """
+    """Привести одноключевой кейсовый вид выражения к теговому."""
     if not isinstance(value, Mapping):
         return value
     if "op" in value:
@@ -185,18 +138,13 @@ def from_wire(value: Any) -> Any:
 
 
 class ExpressionBase(BaseModel):
-    """Общее для узлов выражения: закрытый набор полей и неизменяемость после сборки."""
+    """Общее для узлов выражения: закрытый набор полей и неизменяемость."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     @model_validator(mode="before")
     @classmethod
     def accept_wire_form(cls, value: Any) -> Any:
-        """Принять кейсовый вид и внутри union, и при прямой сборке узла.
-
-        Returns:
-            Теговый вид выражения либо вход без изменений.
-        """
         return from_wire(value)
 
 
@@ -208,11 +156,6 @@ class VarExpr(ExpressionBase):
 
     @model_serializer(mode="plain")
     def to_wire(self) -> dict[str, Any]:
-        """Отдать узел в кейсовом виде.
-
-        Returns:
-            Словарь с единственным ключом ``var``.
-        """
         return {"var": self.name}
 
 
@@ -224,11 +167,6 @@ class AndExpr(ExpressionBase):
 
     @model_serializer(mode="plain")
     def to_wire(self) -> dict[str, Any]:
-        """Отдать узел в кейсовом виде.
-
-        Returns:
-            Словарь с единственным ключом ``and``.
-        """
         return {"and": self.args}
 
 
@@ -240,11 +178,6 @@ class EqExpr(ExpressionBase):
 
     @model_serializer(mode="plain")
     def to_wire(self) -> dict[str, Any]:
-        """Отдать узел в кейсовом виде.
-
-        Returns:
-            Словарь с единственным ключом ``eq``.
-        """
         return {"eq": self.args}
 
 
@@ -257,11 +190,6 @@ class InExpr(ExpressionBase):
 
     @model_serializer(mode="plain")
     def to_wire(self) -> dict[str, Any]:
-        """Отдать узел в кейсовом виде.
-
-        Returns:
-            Словарь с единственным ключом ``in``.
-        """
         return {"in": [self.value, self.members]}
 
 
@@ -275,11 +203,7 @@ Operand = Expression | Scalar
 
 
 class Effect(BaseModel):
-    """Присваивание переменной: ``{"set": ["status", "Approved"]}``.
-
-    Один оператор эффекта, как в разделе 8.2 ``API_CONTRACT.md``. Новые операции
-    появятся вместе с правкой контракта.
-    """
+    """Присваивание переменной: ``{"set": ["status", "Approved"]}``."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -290,11 +214,6 @@ _EXPRESSION_NODES = (VarExpr, AndExpr, EqExpr, InExpr)
 
 
 def _resolve_forward_references() -> None:
-    """Собрать модели узлов: `Expression` и `Operand` определены после них.
-
-    Raises:
-        pydantic.errors.PydanticUndefinedAnnotation: если аннотацию разрешить не удалось.
-    """
     namespace = {"Expression": Expression, "Operand": Operand, "Scalar": Scalar}
     for node in _EXPRESSION_NODES:
         node.model_rebuild(_types_namespace=namespace)

@@ -1,20 +1,3 @@
-"""VerificationResult — результат детерминированной проверки.
-
-Формат контракта из кейса, уточнённый разделом 8.1 ``API_CONTRACT.md``. Статусов
-шесть плюс ``PENDING``: первые шесть — выход движка, ``PENDING`` — состояние записи,
-пока фоновая задача не завершилась. Разводить их в одном перечислении удобно: колонка
-``verifications.status`` и модель не расходятся.
-
-``TIMEOUT`` и ``STATE_LIMIT_REACHED`` нельзя выдать за успех, поэтому контрпример
-разрешён только при ``PROPERTY_VIOLATED``: при остальных статусах его наличие —
-ошибка, и модель её не пропускает.
-
-Ресурс ``Verification`` из контракта шире результата проверки: к голове движка в нём
-приклеен хвост агента — сценарий на языке требований, гипотеза и вопрос. Обе части
-живут в домене, но в разных моделях, потому что граница LLM / движок проходит именно
-между ними: результат на вход агента, объяснение на его выход.
-"""
-
 from __future__ import annotations
 
 from enum import StrEnum
@@ -30,9 +13,8 @@ NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 class VerificationStatus(StrEnum):
     """Итог проверки.
 
-    ``PROPERTY_HOLDS`` означает лишь, что в исследованной конечной модели при заданных
-    ограничениях нарушений нет. Это не доказательство корректности production-системы,
-    и агент обязан это оговаривать.
+    ``PROPERTY_HOLDS`` означает лишь, что в исследованной конечной модели нарушений нет,
+    и агент обязан оговорить это пользователю.
     """
 
     PENDING = "PENDING"
@@ -56,7 +38,7 @@ STATUSES_REQUIRING_PROPERTY_ID = frozenset(
 
 
 class Statistics(BaseModel):
-    """Сколько состояния породил перебор."""
+    """Сколько состояний породил перебор."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -66,14 +48,6 @@ class Statistics(BaseModel):
 
     @model_validator(mode="after")
     def validate_counts(self) -> Statistics:
-        """Проверить, что разных состояний не больше, чем порождено.
-
-        Returns:
-            Статистику без изменений.
-
-        Raises:
-            ValueError: если distinct_states превышает states_generated.
-        """
         if self.distinct_states > self.states_generated:
             raise ValueError(
                 f"distinct_states={self.distinct_states} больше "
@@ -84,13 +58,10 @@ class Statistics(BaseModel):
 
 
 class CounterexampleStep(BaseModel):
-    """Один шаг трассы: номер, имя перехода и полное состояние.
+    """Шаг трассы: номер, имя перехода и состояние.
 
-    На шаге 0 перехода нет — это начальное состояние, а не результат события.
-
-    Состав состояния модель не сверяет: у неё нет доступа к ``BehavioralModel``, а
-    пример контрпримера в кейсе перечисляет состояния не полностью. Полноту состояния
-    проверяет ``BehavioralModel.verify_trace``, куда сходятся и модель, и результат.
+    На шаге 0 перехода нет — это начальное состояние. Состав состояния сверяет
+    ``BehavioralModel.verify_trace``: у шага нет доступа к модели.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -109,15 +80,6 @@ class Counterexample(BaseModel):
 
     @model_validator(mode="after")
     def validate_trace(self) -> Counterexample:
-        """Проверить нумерацию шагов и наличие переходов на всех шагах кроме нулевого.
-
-        Returns:
-            Контрпример без изменений.
-
-        Raises:
-            ValueError: если трасса не начинается с шага 0, нумерация сбита или
-                начальное состояние помечено переходом.
-        """
         for position, step in enumerate(self.steps):
             if step.number != position:
                 raise ValueError(
@@ -142,7 +104,7 @@ class RelatedRequirement(BaseModel):
 
 
 class VerificationResult(BaseModel):
-    """Выход Model Checker Tool: то, что агент читает на входе."""
+    """Выход Model Checker Tool."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -158,15 +120,6 @@ class VerificationResult(BaseModel):
 
     @model_validator(mode="after")
     def validate_property_id(self) -> VerificationResult:
-        """Требовать ``property_id`` там, где проверялось конкретное свойство.
-
-        Returns:
-            Результат без изменений.
-
-        Raises:
-            ValueError: если ``property_id`` пуст при статусе, который называет
-                проверяемое свойство.
-        """
         if self.property_id is None and self.status in STATUSES_REQUIRING_PROPERTY_ID:
             raise ValueError(
                 f"статус {self.status} называет проверяемое свойство, "
@@ -176,15 +129,6 @@ class VerificationResult(BaseModel):
 
     @model_validator(mode="after")
     def validate_counterexample_presence(self) -> VerificationResult:
-        """Привязать контрпример к статусу: только при нарушении, и обязательно.
-
-        Returns:
-            Результат без изменений.
-
-        Raises:
-            ValueError: если контрпример обязателен, но отсутствует, либо присутствует
-                при статусе, который нарушением не является.
-        """
         violated = self.status is VerificationStatus.PROPERTY_VIOLATED
         if violated and self.counterexample is None:
             raise ValueError("при статусе PROPERTY_VIOLATED контрпример обязателен")
@@ -198,10 +142,8 @@ class VerificationResult(BaseModel):
 class VerificationExplanation(BaseModel):
     """Выход агента: сценарий на языке требований, гипотеза и вопрос.
 
-    ``business_summary`` обязателен и при этом может быть пустым: у ещё идущего прогона
-    объяснять нечего, и критерий 8.6.3 контракта требует именно пустую строку. Пустая
-    строка на любом другом статусе — уже нарушение, но правило живёт в агрегате
-    ``Verification``, потому что там известен статус.
+    ``business_summary`` может быть пустым у ещё идущего прогона. Пустая строка на
+    терминальном статусе запрещена в ``Verification``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -212,10 +154,9 @@ class VerificationExplanation(BaseModel):
 
 
 class Verification(BaseModel):
-    """Ресурс контракта: результат проверки и объяснение агента рядом.
+    """Ресурс контракта: результат проверки и объяснение агента.
 
-    Идентичности записи здесь нет: ``id``, ``project_id``, ``model_version_id`` и
-    ``created_at`` добавляет API-слой при сборке ответа из строки ``verifications``.
+    Идентичности записи нет — её добавляет API-слой при сборке ответа.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -225,26 +166,10 @@ class Verification(BaseModel):
 
     @property
     def status(self) -> VerificationStatus:
-        """Статус проверки.
-
-        Returns:
-            Статус из результата — чтобы не доставать его вложенным обращением.
-        """
         return self.result.status
 
     @model_validator(mode="after")
     def validate_explanation_present(self) -> Verification:
-        """Требовать объяснение на всех статусах, кроме ещё идущего прогона.
-
-        Критерии 8.6.7 и 8.6.8: у успеха и у всех четырёх «результата нет» сценарий
-        непустой, иначе пользователь увидит пустую строку там, где ждал вывод.
-
-        Returns:
-            Агрегат без изменений.
-
-        Raises:
-            ValueError: если при терминальном статусе объяснение пустое.
-        """
         pending = self.result.status is VerificationStatus.PENDING
         if not pending and not self.explanation.business_summary.strip():
             raise ValueError(

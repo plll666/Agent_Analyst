@@ -1,18 +1,3 @@
-"""BehavioralModel — формальная модель состояний и переходов.
-
-Граница ответственности LLM и Model Checker проходит ровно здесь: агент отдаёт эту
-структуру, движок её принимает. Всё, что не проходит проверки ниже, до движка не доходит.
-
-Реализованы девять проверок «Этапа 1: валидация модели» из кейса: уникальность имён
-variables, уникальность transition names, корректность типов, наличие initial values,
-попадание initial values в domain, ссылки только на существующие variables, корректность
-guard и effects, конечность всех domains, корректность property.
-
-Локальные нарушения (неверный тип, выход значения за домен) отвергает сама модель через
-``model_validator``. Проверки, требующие видеть всю модель целиком, — уникальность имён,
-initial, ссылки из выражений, — делает ``BehavioralModel.validate_model``.
-"""
-
 from __future__ import annotations
 
 from collections import Counter
@@ -44,12 +29,7 @@ _VARIABLE_KIND: Mapping[VariableType, str] = {"enum": "str", "boolean": "bool", 
 
 
 class Variable(BaseModel):
-    """Переменная состояния с конечным доменом.
-
-    Домен обязателен и конечен: без него состояний бесконечно много и проверка не
-    завершится. У ``enum`` домен перечислен в ``values``, у ``integer`` задан границами
-    ``min``/``max``, у ``boolean`` он неявный — ``{false, true}``.
-    """
+    """Переменная состояния: ``values`` у ``enum``, ``min`` и ``max`` у ``integer``."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -63,14 +43,6 @@ class Variable(BaseModel):
 
     @model_validator(mode="after")
     def validate_domain(self) -> Variable:
-        """Проверить, что домен задан и что лишних полей нет.
-
-        Returns:
-            Переменную без изменений.
-
-        Raises:
-            ValueError: если набор полей не соответствует типу или домен не конечен.
-        """
         if self.type == "enum":
             if not self.values:
                 raise ValueError(
@@ -81,9 +53,17 @@ class Variable(BaseModel):
                 raise ValueError(
                     f"переменная {self.name!r}: значения домена повторяются: {sorted(duplicates)}"
                 )
-            self._reject_bounds()
+            if self.min is not None or self.max is not None:
+                raise ValueError(
+                    f"переменная {self.name!r} типа enum задаёт значения перечисления; "
+                    "поля min и max к нему неприменимы"
+                )
         elif self.type == "boolean":
-            self._reject_domain_fields()
+            used = [name for name in ("values", "min", "max") if getattr(self, name) is not None]
+            if used:
+                raise ValueError(
+                    f"переменная {self.name!r} типа boolean не принимает поля домена: {used}"
+                )
         else:
             if self.values is not None:
                 raise ValueError(
@@ -101,38 +81,9 @@ class Variable(BaseModel):
                 )
         return self
 
-    def _reject_bounds(self) -> None:
-        """Отвергнуть границы min/max у переменной с доменом-перечислением.
-
-        Raises:
-            ValueError: если задана хотя бы одна граница.
-        """
-        if self.min is not None or self.max is not None:
-            raise ValueError(
-                f"переменная {self.name!r} типа enum задаёт значения перечисления; "
-                "поля min и max к нему неприменимы"
-            )
-
-    def _reject_domain_fields(self) -> None:
-        """Отвергнуть поля домена у boolean: его домен неявный и задаётся типом.
-
-        Raises:
-            ValueError: если задано любое из полей values, min или max.
-        """
-        used = [name for name in ("values", "min", "max") if getattr(self, name) is not None]
-        if used:
-            raise ValueError(
-                f"переменная {self.name!r} типа boolean не принимает поля домена: {used}"
-            )
-
 
 class Property(BaseModel):
-    """Проверяемое утверждение о модели.
-
-    Из четырёх типов кейса выражение требуется всем, кроме ``deadlock_free``: у него
-    утверждение не о состоянии, а о том, что из каждого достижимого состояния есть
-    исходящий переход, поэтому выражать его выражением над переменными нечем.
-    """
+    """Проверяемое утверждение. Выражение обязательно у всех типов кроме ``deadlock_free``."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -144,14 +95,6 @@ class Property(BaseModel):
 
     @model_validator(mode="after")
     def validate_expression(self) -> Property:
-        """Проверить соответствие между типом свойства и наличием выражения.
-
-        Returns:
-            Свойство без изменений.
-
-        Raises:
-            ValueError: если выражение обязательно, но отсутствует, либо наоборот.
-        """
         needs_expression = self.type in EXPRESSION_REQUIRED_TYPES
         if needs_expression and self.expression is None:
             raise ValueError(f"свойство {self.id!r} типа {self.type!r} требует expression")
@@ -176,7 +119,7 @@ class Transition(BaseModel):
 
 
 class BehavioralModel(BaseModel):
-    """Формальная модель состояний и переходов — формат на границе LLM / движка."""
+    """Формальная модель состояний и переходов."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -186,28 +129,13 @@ class BehavioralModel(BaseModel):
     properties: tuple[Property, ...] = Field(min_length=1)
 
     def variable_map(self) -> dict[str, Variable]:
-        """Собрать переменные в словарь по имени.
-
-        Returns:
-            Отображение имя → переменная. Дубли имён сюда не попадают: модель с ними
-            не прошла бы ``validate_model``.
-        """
         return {variable.name: variable for variable in self.variables}
 
     def verify_trace(self, steps: Sequence[CounterexampleStep]) -> list[str]:
-        """Сверить состояния контрпримера с этой моделью.
+        """Сверить состояния контрпримера с этой моделью: полнота и попадание в домены.
 
-        ``CounterexampleStep`` модель не видит, поэтому полноту состояния — все
-        переменные модели и значения в доменах — проверяют здесь, где сходятся и
-        модель, и результат. Требует критерий 8.6.6 ``API_CONTRACT.md``.
-
-        Args:
-            steps: шаги контрпримера в порядке трассы.
-
-        Returns:
-            Список нарушений; пустой, если трасса согласована с моделью. Проверка не
-            бросает: несоответствие состояния не отменяет прогон, а попадает в
-            ``error_detail`` рядом с результатом.
+        Возвращает список нарушений, а не бросает: несоответствие состояния не отменяет
+        прогон, а попадает в ``error_detail`` рядом с результатом.
         """
         variables = self.variable_map()
         expected = set(variables)
@@ -226,50 +154,14 @@ class BehavioralModel(BaseModel):
 
     @model_validator(mode="after")
     def validate_model(self) -> BehavioralModel:
-        """Проверить модель целиком, собрать все нарушения и отвергнуть её разом.
-
-        Собирать, а не падать на первом: пользователю нужны все причины отказа сразу,
-        а не по одной за прогон.
-
-        Returns:
-            Модель без изменений.
-
-        Raises:
-            ValueError: если нарушено хотя бы одно из девяти требований Этапа 1.
-        """
+        """Собрать все нарушения и отвергнуть модель разом, а не по одному."""
         errors: list[str] = []
-        variables = self._collect_variables(errors)
-        self._check_unique_names(errors)
-        self._check_initial(errors, variables)
-        self._check_transitions(errors, variables)
-        self._check_properties(errors, variables)
-        if errors:
-            raise ValueError("; ".join(errors))
-        return self
-
-    def _collect_variables(self, errors: list[str]) -> dict[str, Variable]:
-        """Собрать переменные по имени, отметив повторы.
-
-        Args:
-            errors: список нарушений, который пополняется на месте.
-
-        Returns:
-            Отображение имя → переменная; для повторяющихся имён берётся первая.
-        """
         variables: dict[str, Variable] = {}
         for variable in self.variables:
             if variable.name in variables:
                 errors.append(f"variables: имя {variable.name!r} повторяется")
             else:
                 variables[variable.name] = variable
-        return variables
-
-    def _check_unique_names(self, errors: list[str]) -> None:
-        """Отметить повторы имён переходов и идентификаторов свойств.
-
-        Args:
-            errors: список нарушений, который пополняется на месте.
-        """
         for label, names in (
             ("transitions", [transition.name for transition in self.transitions]),
             ("properties", [prop.id for prop in self.properties]),
@@ -278,13 +170,6 @@ class BehavioralModel(BaseModel):
                 if count > 1:
                     errors.append(f"{label}: имя {name!r} повторяется {count} раза")
 
-    def _check_initial(self, errors: list[str], variables: Mapping[str, Variable]) -> None:
-        """Проверить начальное состояние: полноту ключей и попадание в домен.
-
-        Args:
-            errors: список нарушений, который пополняется на месте.
-            variables: переменные модели по имени.
-        """
         expected = set(variables)
         actual = set(self.initial)
         for missing in sorted(expected - actual):
@@ -294,13 +179,6 @@ class BehavioralModel(BaseModel):
         for name in sorted(actual & expected):
             errors.extend(_value_errors(variables[name], self.initial[name], f"initial.{name}"))
 
-    def _check_transitions(self, errors: list[str], variables: Mapping[str, Variable]) -> None:
-        """Проверить guard и effects каждого перехода.
-
-        Args:
-            errors: список нарушений, который пополняется на месте.
-            variables: переменные модели по имени.
-        """
         for transition in self.transitions:
             path = f"transitions[{transition.name!r}]"
             errors.extend(_expression_errors(transition.guard, variables, f"{path}.guard"))
@@ -320,33 +198,21 @@ class BehavioralModel(BaseModel):
                 assigned.add(target)
                 errors.extend(_value_errors(variables[target], value, where))
 
-    def _check_properties(self, errors: list[str], variables: Mapping[str, Variable]) -> None:
-        """Проверить выражения свойств и их идентификаторы.
-
-        Args:
-            errors: список нарушений, который пополняется на месте.
-            variables: переменные модели по имени.
-        """
         for prop in self.properties:
-            if prop.expression is None:
-                continue
-            errors.extend(
-                _expression_errors(
-                    prop.expression, variables, f"properties[{prop.id!r}].expression"
+            if prop.expression is not None:
+                errors.extend(
+                    _expression_errors(
+                        prop.expression, variables, f"properties[{prop.id!r}].expression"
+                    )
                 )
-            )
+
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
 
 
 def _literal_kind(value: Scalar) -> str:
-    """Определить вид скалярного значения.
-
-    Args:
-        value: литерал из выражения или из начального состояния.
-
-    Returns:
-        ``"str"``, ``"bool"`` или ``"int"``. Проверка bool идёт раньше int, потому что
-        в Python ``bool`` — подтип ``int``.
-    """
+    """Вид скаляра. Проверка bool раньше int: в Python ``bool`` — подтип ``int``."""
     if isinstance(value, bool):
         return "bool"
     if isinstance(value, int):
@@ -355,15 +221,6 @@ def _literal_kind(value: Scalar) -> str:
 
 
 def _operand_kind(operand: Operand, variables: Mapping[str, Variable]) -> str:
-    """Определить вид операнда: по переменной или по литералу.
-
-    Args:
-        operand: операнд выражения.
-        variables: переменные модели по имени; операнд уже проверен на известность.
-
-    Returns:
-        ``"str"``, ``"bool"`` или ``"int"``.
-    """
     match operand:
         case VarExpr():
             return _VARIABLE_KIND[variables[operand.name].type]
@@ -372,16 +229,6 @@ def _operand_kind(operand: Operand, variables: Mapping[str, Variable]) -> str:
 
 
 def _value_errors(variable: Variable, value: Scalar, where: str) -> list[str]:
-    """Сверить значение с типом и доменом переменной.
-
-    Args:
-        variable: переменная-адресат.
-        value: значение из ``initial`` или из effects.
-        where: путь для сообщения об ошибке.
-
-    Returns:
-        Список нарушений; пустой, если значение корректно.
-    """
     match variable.type:
         case "enum":
             values = variable.values or ()
@@ -416,16 +263,6 @@ def _value_errors(variable: Variable, value: Scalar, where: str) -> list[str]:
 def _domain_errors(
     operands: list[Operand], variables: Mapping[str, Variable], where: str
 ) -> list[str]:
-    """Проверить, что литерал противопоставленной переменной входит в её домен.
-
-    Args:
-        operands: два операнда сравнения.
-        variables: переменные модели по имени.
-        where: путь для сообщения об ошибке.
-
-    Returns:
-        Список нарушений; пустой, если все литералы попадают в домены.
-    """
     left, right = operands
     errors: list[str] = []
     for candidate, reference in ((left, right), (right, left)):
@@ -446,16 +283,7 @@ def _domain_errors(
 
 
 def _comparison_errors(expr: EqExpr, variables: Mapping[str, Variable], where: str) -> list[str]:
-    """Проверить бинарное сравнение: известность операндов, типы и домены.
-
-    Args:
-        expr: узел сравнения.
-        variables: переменные модели по имени.
-        where: путь для сообщения об ошибке.
-
-    Returns:
-        Список нарушений; пустой, если сравнение корректно.
-    """
+    """Проверить бинарное сравнение: известность операндов, типы и домены."""
     left, right = expr.args
     errors: list[str] = []
     for operand, label in ((left, "левый"), (right, "правый")):
@@ -474,16 +302,6 @@ def _comparison_errors(expr: EqExpr, variables: Mapping[str, Variable], where: s
 
 
 def _membership_errors(expr: InExpr, variables: Mapping[str, Variable], where: str) -> list[str]:
-    """Проверить вхождение: известность выражения, типы и домен элементов списка.
-
-    Args:
-        expr: узел ``in``.
-        variables: переменные модели по имени.
-        where: путь для сообщения об ошибке.
-
-    Returns:
-        Список нарушений; пустой, если вхождение корректно.
-    """
     if isinstance(expr.value, VarExpr) and expr.value.name not in variables:
         return [f"{where}: ссылка на неизвестную переменную {expr.value.name!r}"]
     errors: list[str] = []
@@ -508,16 +326,6 @@ def _membership_errors(expr: InExpr, variables: Mapping[str, Variable], where: s
 def _expression_errors(
     expr: Expression, variables: Mapping[str, Variable], where: str
 ) -> list[str]:
-    """Обойти выражение и собрать нарушения: неизвестные переменные и несовпадение типов.
-
-    Args:
-        expr: проверяемое выражение.
-        variables: переменные модели по имени.
-        where: путь для сообщения об ошибке.
-
-    Returns:
-        Список нарушений; пустой, если выражение корректно.
-    """
     match expr:
         case VarExpr():
             if expr.name not in variables:
