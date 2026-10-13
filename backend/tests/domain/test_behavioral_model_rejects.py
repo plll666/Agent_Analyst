@@ -1,10 +1,3 @@
-"""Каждое нарушение отвергается.
-
-Правило Этапа 1 перечисляет девять проверок; ниже каждая отказа и каждый тип опечатки
-разбираются отдельным тестом. Тесты проверяют не только факт отказа, но и текст ошибки:
-иначе тест на уникальность имён мог бы «проходить» из-за неверного домена.
-"""
-
 from copy import deepcopy
 
 import pytest
@@ -45,16 +38,6 @@ STATUSES_REQUIRING_PROPERTY_ID = [
 
 
 def replace_transition(document: dict, name: str, **changes: object) -> dict:
-    """Заменить один переход целиком или поправить его поля.
-
-    Args:
-        document: модель кейса.
-        name: имя перехода, который правят.
-        **changes: поля, которые нужно заменить.
-
-    Returns:
-        Ту же модель с изменённым переходом.
-    """
     for transition in document["transitions"]:
         if transition["name"] == name:
             transition.update(changes)
@@ -62,16 +45,6 @@ def replace_transition(document: dict, name: str, **changes: object) -> dict:
 
 
 def replace_guard(document: dict, name: str, guard: object) -> dict:
-    """Поставить переходу новый guard.
-
-    Args:
-        document: модель кейса.
-        name: имя перехода.
-        guard: новое выражение.
-
-    Returns:
-        Ту же модель с изменённым guard.
-    """
     return replace_transition(document, name, guard=guard)
 
 
@@ -688,14 +661,6 @@ def test_verify_trace_rejects_value_outside_domain() -> None:
 
 
 def _result_for_status(status: str) -> VerificationResult:
-    """Собрать корректный результат с заданным статусом.
-
-    Args:
-        status: статус из семи значений контракта.
-
-    Returns:
-        Готовый результат: с контрпримером для нарушения и без него для остальных.
-    """
     if status == "PROPERTY_VIOLATED":
         return VerificationResult.model_validate(contract_result())
     return VerificationResult.model_validate(
@@ -860,16 +825,6 @@ def test_rejects_negative_duration() -> None:
 
 
 def _step(number: int, *, transition: str | None = None, state: dict | None = None) -> dict:
-    """Собрать шаг трассы для отклоняющих тестов.
-
-    Args:
-        number: номер шага.
-        transition: имя перехода; по умолчанию подставляется имя шага.
-        state: состояние шага; по умолчанию берётся состояние кейса.
-
-    Returns:
-        Словарь шага контрпримера.
-    """
     base = {
         0: {"status": "Created", "approved": False, "cancelled": False},
         1: {"status": "Approved", "approved": True, "cancelled": False},
