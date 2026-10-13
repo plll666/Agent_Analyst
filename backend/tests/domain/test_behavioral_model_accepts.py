@@ -85,6 +85,7 @@ def test_accepts_case_transition_cancel() -> None:
 def test_accepts_case_transition_execute() -> None:
     transition = Transition.model_validate(CASE_TRANSITION_EXECUTE)
 
+    assert isinstance(transition.guard, EqExpr)
     assert transition.guard.args[1] is True
     assert transition.effects[0].set == ("status", "Executed")
 
@@ -178,6 +179,103 @@ def test_accepts_explicit_null_expression_of_contract() -> None:
     deadlock = next(item for item in model.properties if item.id == "P4")
     assert deadlock.type == "deadlock_free"
     assert deadlock.expression is None
+
+
+def test_dump_omits_null_values_of_variable() -> None:
+    dumped = BehavioralModel.model_validate(contract_model_fixed()).model_dump(mode="json")
+
+    boolean = next(item for item in dumped["variables"] if item["name"] == "approved")
+    assert "values" not in boolean
+    assert "min" not in boolean
+    assert "max" not in boolean
+
+
+def test_dump_omits_null_expression_of_deadlock_free() -> None:
+    dumped = BehavioralModel.model_validate(contract_model_fixed()).model_dump(mode="json")
+
+    deadlock = next(item for item in dumped["properties"] if item["id"] == "P4")
+    assert "expression" not in deadlock
+
+
+def test_dump_omits_null_optional_fields_of_variable() -> None:
+    dumped = BehavioralModel.model_validate(contract_model_fixed()).model_dump(mode="json")
+
+    status = next(item for item in dumped["variables"] if item["name"] == "status")
+    assert "description" not in status
+    assert "source_reference" not in status
+
+
+def test_verification_dumps_flat_for_frontend() -> None:
+    verification = Verification(
+        result=VerificationResult.model_validate(contract_result()),
+        explanation=VerificationExplanation.model_validate(CONTRACT_EXPLANATION),
+    )
+    dumped = verification.model_dump(mode="json")
+
+    assert "result" not in dumped
+    assert "explanation" not in dumped
+    assert dumped["status"] == "PROPERTY_VIOLATED"
+    assert dumped["business_summary"] == CONTRACT_EXPLANATION["business_summary"]
+    assert dumped["hypothesis"] == CONTRACT_EXPLANATION["hypothesis"]
+    assert dumped["property_id"] == "P2"
+
+
+def test_verification_dump_omits_null_fields() -> None:
+    verification = Verification(
+        result=VerificationResult.model_validate(CONTRACT_PENDING_RESULT),
+        explanation=VerificationExplanation(business_summary=""),
+    )
+    dumped = verification.model_dump(mode="json")
+
+    assert "property_id" not in dumped
+    assert "counterexample" not in dumped
+    assert "statistics" not in dumped
+    assert dumped["business_summary"] == ""
+
+
+def test_related_requirement_accepts_null_fields() -> None:
+    result = VerificationResult.model_validate(
+        {**contract_result(), "related_requirements": [{"paragraph_ref": None, "quote": None}]}
+    )
+
+    assert result.related_requirements is not None
+    assert result.related_requirements[0].paragraph_ref is None
+    assert result.related_requirements[0].quote is None
+
+
+def test_accepts_names_of_reserved_tla_plus_words() -> None:
+    document = {
+        "variables": [
+            {"name": "next", "type": "enum", "values": ["Created", "Cancelled"]},
+            {"name": "default", "type": "boolean"},
+            {"name": "module", "type": "boolean"},
+        ],
+        "initial": {"next": "Created", "default": False, "module": False},
+        "transitions": [
+            {
+                "name": "then",
+                "guard": {"eq": [{"var": "next"}, "Created"]},
+                "effects": [{"set": ["default", True]}],
+            }
+        ],
+        "properties": [
+            {
+                "id": "P1",
+                "type": "invariant",
+                "expression": {
+                    "and": [
+                        {"eq": [{"var": "next"}, "Cancelled"]},
+                        {"eq": [{"var": "module"}, True]},
+                    ]
+                },
+            }
+        ],
+    }
+
+    model = BehavioralModel.model_validate(document)
+
+    assert model.variables[0].name == "next"
+    assert model.transitions[0].name == "then"
 
 
 def test_round_trip_through_dump_is_stable() -> None:

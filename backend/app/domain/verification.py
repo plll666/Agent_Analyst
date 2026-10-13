@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_serializer,
+    model_validator,
+)
 
+from app.domain.base import WireModel
 from app.domain.expressions import Scalar
 
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
@@ -37,10 +45,8 @@ STATUSES_REQUIRING_PROPERTY_ID = frozenset(
 )
 
 
-class Statistics(BaseModel):
+class Statistics(WireModel):
     """Сколько состояний породил перебор."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     states_generated: int = Field(ge=0)
     distinct_states: int = Field(ge=0)
@@ -57,24 +63,20 @@ class Statistics(BaseModel):
         return self
 
 
-class CounterexampleStep(BaseModel):
+class CounterexampleStep(WireModel):
     """Шаг трассы: номер, имя перехода и состояние.
 
     На шаге 0 перехода нет — это начальное состояние. Состав состояния сверяет
     ``BehavioralModel.verify_trace``: у шага нет доступа к модели.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
     number: int = Field(ge=0)
     transition: str | None = None
     state: dict[str, Scalar] = Field(min_length=1)
 
 
-class Counterexample(BaseModel):
+class Counterexample(WireModel):
     """Путь от начального состояния до первого нарушения свойства."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     steps: tuple[CounterexampleStep, ...] = Field(min_length=1)
 
@@ -94,19 +96,15 @@ class Counterexample(BaseModel):
         return self
 
 
-class RelatedRequirement(BaseModel):
+class RelatedRequirement(WireModel):
     """Ссылка на фрагмент исходного требования, с которым связан контрпример."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    paragraph_ref: NonEmpty
-    quote: NonEmpty
+    paragraph_ref: str | None = None
+    quote: str | None = None
 
 
-class VerificationResult(BaseModel):
+class VerificationResult(WireModel):
     """Выход Model Checker Tool."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     status: VerificationStatus
     property_id: NonEmpty | None = None
@@ -139,14 +137,12 @@ class VerificationResult(BaseModel):
         return self
 
 
-class VerificationExplanation(BaseModel):
+class VerificationExplanation(WireModel):
     """Выход агента: сценарий на языке требований, гипотеза и вопрос.
 
     ``business_summary`` может быть пустым у ещё идущего прогона. Пустая строка на
     терминальном статусе запрещена в ``Verification``.
     """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     business_summary: str
     hypothesis: str | None = None
@@ -156,7 +152,9 @@ class VerificationExplanation(BaseModel):
 class Verification(BaseModel):
     """Ресурс контракта: результат проверки и объяснение агента.
 
-    Идентичности записи нет — её добавляет API-слой при сборке ответа.
+    Сериализуется плоско, как ждёт фронт: ``id``, ``project_id``, ``model_version_id``
+    и ``created_at`` добавляет API-слой из строки ``verifications``. Обратно такой дамп
+    не разбирается — он не доменный документ.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -167,6 +165,12 @@ class Verification(BaseModel):
     @property
     def status(self) -> VerificationStatus:
         return self.result.status
+
+    @model_serializer(mode="plain")
+    def to_api(self) -> dict[str, Any]:
+        payload = self.result.model_dump(mode="json")
+        payload.update(self.explanation.model_dump(mode="json"))
+        return payload
 
     @model_validator(mode="after")
     def validate_explanation_present(self) -> Verification:

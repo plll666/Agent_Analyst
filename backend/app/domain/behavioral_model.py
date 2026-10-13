@@ -6,6 +6,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.domain.base import WireModel
 from app.domain.expressions import (
     AndExpr,
     Effect,
@@ -28,10 +29,8 @@ EXPRESSION_REQUIRED_TYPES = frozenset({"invariant", "forbidden_state", "reachabl
 _VARIABLE_KIND: Mapping[VariableType, str] = {"enum": "str", "boolean": "bool", "integer": "int"}
 
 
-class Variable(BaseModel):
+class Variable(WireModel):
     """Переменная состояния: ``values`` у ``enum``, ``min`` и ``max`` у ``integer``."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: Ident
     type: VariableType
@@ -82,10 +81,8 @@ class Variable(BaseModel):
         return self
 
 
-class Property(BaseModel):
+class Property(WireModel):
     """Проверяемое утверждение. Выражение обязательно у всех типов кроме ``deadlock_free``."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: Ident
     type: PropertyType
@@ -106,10 +103,8 @@ class Property(BaseModel):
         return self
 
 
-class Transition(BaseModel):
+class Transition(WireModel):
     """Одно допустимое изменение состояния: имя, guard и effects."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: Ident
     guard: Expression

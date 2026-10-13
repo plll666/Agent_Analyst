@@ -66,7 +66,7 @@ cd backend  && uv run pytest
 
 cd backend  && uv run ruff check .
 cd backend  && uv run ruff format --check .
-cd backend  && uv run mypy app alembic
+cd backend  && uv run mypy app alembic tests
 cd backend  && uv run ruff format . && uv run ruff check --fix .
 
 cd frontend && npm run lint

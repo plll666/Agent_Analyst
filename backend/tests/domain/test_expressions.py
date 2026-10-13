@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from app.domain.behavioral_model import BehavioralModel
@@ -24,7 +26,9 @@ REMOVED_OPERATORS = ["not", "or", "neq", "gt", "gte", "lt", "lte", "add", "inc"]
         ({"in": [{"var": "a"}, [1, 2]]}, InExpr, "in"),
     ],
 )
-def test_parses_every_contract_operator(wire: dict, node_type: type, operator: str) -> None:
+def test_parses_every_contract_operator(
+    wire: dict[str, Any], node_type: type, operator: str
+) -> None:
     from app.domain.behavioral_model import Transition
 
     transition = Transition.model_validate(

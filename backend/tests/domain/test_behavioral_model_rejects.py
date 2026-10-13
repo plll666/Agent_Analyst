@@ -1,4 +1,5 @@
 from copy import deepcopy
+from typing import Any
 
 import pytest
 
@@ -37,14 +38,14 @@ STATUSES_REQUIRING_PROPERTY_ID = [
 ]
 
 
-def replace_transition(document: dict, name: str, **changes: object) -> dict:
+def replace_transition(document: dict[str, Any], name: str, **changes: object) -> dict[str, Any]:
     for transition in document["transitions"]:
         if transition["name"] == name:
             transition.update(changes)
     return document
 
 
-def replace_guard(document: dict, name: str, guard: object) -> dict:
+def replace_guard(document: dict[str, Any], name: str, guard: object) -> dict[str, Any]:
     return replace_transition(document, name, guard=guard)
 
 
@@ -157,19 +158,6 @@ def test_rejects_variable_name_with_space() -> None:
     document["variables"][0]["name"] = "current status"
 
     assert_rejected(BehavioralModel, document, "should match pattern")
-
-
-def test_rejects_reserved_variable_name() -> None:
-    document = case_model()
-    document["variables"][0]["name"] = "Init"
-    document["initial"] = {
-        "Init": "Created",
-        "approved": False,
-        "cancelled": False,
-        "attempts": 0,
-    }
-
-    assert_rejected(BehavioralModel, document, "зарезервировано")
 
 
 def test_rejects_unknown_variable_field() -> None:
@@ -555,24 +543,6 @@ def test_rejects_missing_property_id_on_status_that_names_it(status: str) -> Non
     assert_rejected(VerificationResult, document, "property_id обязателен")
 
 
-def test_rejects_related_requirements_without_paragraph_ref() -> None:
-    document = {
-        **contract_result(),
-        "related_requirements": [{"quote": "Заявка после согласования…"}],
-    }
-
-    assert_rejected(VerificationResult, document, "Field required")
-
-
-def test_rejects_related_requirement_with_empty_quote() -> None:
-    document = {
-        **contract_result(),
-        "related_requirements": [{"paragraph_ref": "p3", "quote": ""}],
-    }
-
-    assert_rejected(VerificationResult, document, "at least 1 character")
-
-
 def test_rejects_related_requirement_with_unknown_field() -> None:
     document = {
         **contract_result(),
@@ -610,7 +580,7 @@ def test_rejects_aggregate_with_unknown_field() -> None:
         Verification(
             result=VerificationResult.model_validate(contract_result()),
             explanation=VerificationExplanation(business_summary="сценарий"),
-            model_auto_edited=False,
+            model_auto_edited=False,  # type: ignore[call-arg]
         )
 
 
@@ -791,7 +761,7 @@ def test_rejects_distinct_states_greater_than_generated() -> None:
         {"states_generated": 0, "distinct_states": 0, "depth": -1},
     ],
 )
-def test_rejects_negative_statistics(statistics: dict) -> None:
+def test_rejects_negative_statistics(statistics: dict[str, Any]) -> None:
     document = {
         "status": "PROPERTY_HOLDS",
         "property_id": "P1",
@@ -824,14 +794,19 @@ def test_rejects_negative_duration() -> None:
     assert_rejected(VerificationResult, document, "greater than or equal to 0")
 
 
-def _step(number: int, *, transition: str | None = None, state: dict | None = None) -> dict:
+def _step(
+    number: int, *, transition: str | None = None, state: dict[str, Any] | None = None
+) -> dict[str, Any]:
     base = {
         0: {"status": "Created", "approved": False, "cancelled": False},
         1: {"status": "Approved", "approved": True, "cancelled": False},
         2: {"status": "Cancelled", "approved": True, "cancelled": True},
         3: {"status": "Executed", "approved": True, "cancelled": True},
     }
-    step = {"number": number, "state": state if state is not None else base.get(number, {})}
+    step: dict[str, Any] = {
+        "number": number,
+        "state": state if state is not None else base.get(number, {}),
+    }
     if transition is not None or number > 0:
         step["transition"] = transition if transition is not None else f"Step{number}"
     return step

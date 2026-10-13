@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
 from pydantic import (
-    AfterValidator,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -23,86 +22,7 @@ VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 DSL_OPERATORS = ("var", "and", "eq", "in")
 
-RESERVED_NAMES = frozenset(
-    {
-        *DSL_OPERATORS,
-        "add",
-        "and",
-        "as",
-        "assert",
-        "assume",
-        "bool",
-        "by",
-        "case",
-        "choose",
-        "constant",
-        "default",
-        "definition",
-        "do",
-        "elif",
-        "else",
-        "end",
-        "enum",
-        "eq",
-        "except",
-        "exists",
-        "extends",
-        "false",
-        "forall",
-        "from",
-        "gt",
-        "gte",
-        "if",
-        "import",
-        "in",
-        "inc",
-        "init",
-        "instance",
-        "lambda",
-        "let",
-        "lt",
-        "lte",
-        "module",
-        "neq",
-        "next",
-        "none",
-        "not",
-        "or",
-        "other",
-        "pass",
-        "raise",
-        "return",
-        "spec",
-        "string",
-        "subset",
-        "then",
-        "theorem",
-        "true",
-        "typeok",
-        "unchanged",
-        "union",
-        "var",
-        "variable",
-        "variables",
-        "while",
-        "with",
-        "yield",
-    }
-)
-
-VarName = Annotated[str, StringConstraints(pattern=VAR_NAME_PATTERN.pattern)]
-
-
-def _reject_reserved(value: str) -> str:
-    if value.lower() in RESERVED_NAMES:
-        raise ValueError(
-            f"имя {value!r} зарезервировано: оно совпадает с оператором DSL, "
-            "ключевым словом TLA+ или Python и не может быть именем элемента модели"
-        )
-    return value
-
-
-Ident = Annotated[VarName, AfterValidator(_reject_reserved)]
+Ident = Annotated[str, StringConstraints(pattern=VAR_NAME_PATTERN.pattern)]
 
 Scalar = StrictStr | StrictBool | StrictInt
 
