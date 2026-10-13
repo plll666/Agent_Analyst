@@ -87,6 +87,7 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+pythonpath = ["."]
 markers = [
     "integration: поднимает внешние зависимости (testcontainers, брокер)",
     "agent: сквозной цикл Natural language -> объяснение",
