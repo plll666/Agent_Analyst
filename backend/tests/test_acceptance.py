@@ -111,15 +111,16 @@ MODEL_HOLDS = {
 }
 
 
-@pytest.mark.integration
+pytest.mark.integration
 async def test_compile_tla_violation_model():
     """Test TLA compilation for violation model."""
     tla, cfg = compile_to_tla(MODEL_VIOLATION)
     assert "VARIABLES status, approved, cancelled" in tla
     assert 'status = "Created"' in tla
     assert "Approve ==" in tla
-    assert "INVARIANT P1 ==" in cfg
-    assert '~(status = "Executed" /\\ cancelled = TRUE)' in cfg
+    assert "P1 ==" in tla
+    assert "INVARIANT P1" in cfg
+    assert '~((status = "Executed") /\\ (cancelled = TRUE))' in tla
 
 
 @pytest.mark.integration
@@ -171,7 +172,7 @@ async def test_run_tlc_holds_returns_property_holds():
     tla, cfg = compile_to_tla(MODEL_HOLDS)
     result = run_tlc(tla, cfg)
 
-    assert result["status"] == "PROPERTY_HOLDS"
+    assert result["status"] == "PROPERTY_HOLDS", f"TLC упал с деталями: {result.get('error_detail')}"
     assert result["engine"] == "TLC"
     assert result["counterexample"] is None
 

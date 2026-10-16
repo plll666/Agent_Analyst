@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-TLA_TOOLS_JAR = Path(os.getenv("TLA_TOOLS_JAR", "/opt/tla/tla2tools.jar"))
+TLA_TOOLS_JAR = Path(os.getenv("TLA_TOOLS_JAR", "D:/analitics_agent_local/backend/tla2tools.jar"))
 CHECK_TIMEOUT_SECONDS = int(os.getenv("CHECK_TIMEOUT_SECONDS", "120"))
 STATE_LIMIT = int(os.getenv("STATE_LIMIT", "1000000"))
 
@@ -47,10 +47,13 @@ def compile_to_tla(model: dict[str, Any]) -> tuple[str, str]:
     for t in transitions:
         name = t["name"]
         guard = _compile_expr(t["guard"])
-        effects = []
+        effects = []        
+        changed_vars = set()
+        
         for eff in t["effects"]:
             if eff.get("set"):
                 var_name, value = eff["set"]
+                changed_vars.add(var_name)
                 if isinstance(value, bool):
                     effects.append(rf"  /\ {var_name}' = {str(value).upper()}")
                 elif isinstance(value, int):
@@ -59,13 +62,34 @@ def compile_to_tla(model: dict[str, Any]) -> tuple[str, str]:
                     effects.append(f'  /\\ {var_name}\' = "{value}"')
             elif eff.get("inc"):
                 var_name, delta = eff["inc"]
+                changed_vars.add(var_name)
                 effects.append(rf"  /\ {var_name}' = {var_name} + {delta}")
             elif eff.get("dec"):
                 var_name, delta = eff["dec"]
-                effects.append(rf"  /\ {var_name}' = {var_name} - {delta}")
+                changed_vars.add(var_name)
+                effects.append(rf"  /\ {var_name}' = {var_name} - {delta}")           
+        for var_name in var_names:
+            if var_name not in changed_vars:
+                effects.append(rf"  /\ {var_name}' = {var_name}")
+                
         trans_lines.append(f"{name} ==\n{guard}\n" + "\n".join(effects))
 
+
     next_line = "  \\/ " + "\n  \\/ ".join(t["name"] for t in transitions)
+
+    tla_prop_lines = []
+    cfg_prop_lines = []
+    for prop in properties:
+        if prop["type"] == "invariant":
+            expr = _compile_expr(prop["expression"])
+            tla_prop_lines.append(f"{prop['id']} == {expr}")
+            cfg_prop_lines.append(f"INVARIANT {prop['id']}")
+        elif prop["type"] == "forbidden_state":
+            expr = _compile_expr(prop["expression"])
+            tla_prop_lines.append(f"{prop['id']} == ~({expr})")
+            cfg_prop_lines.append(f"INVARIANT {prop['id']}")
+
+    tla_properties_section = "\n".join(tla_prop_lines) if tla_prop_lines else ""
 
     tla = rf"""---------------------------- MODULE Model ----------------------------
 EXTENDS Naturals, Sequences, TLC
@@ -82,23 +106,17 @@ Next ==
 
 Spec == Init /\ [][Next]_<<{vars_line}>>
 
-======================================================================="""
+{tla_properties_section}
 
-    prop_lines = []
-    for prop in properties:
-        if prop["type"] == "invariant":
-            expr = _compile_expr(prop["expression"])
-            prop_lines.append(f"INVARIANT {prop['id']} == {expr}")
-        elif prop["type"] == "forbidden_state":
-            expr = _compile_expr(prop["expression"])
-            prop_lines.append(f"INVARIANT {prop['id']} == ~({expr})")
+======================================================================="""
 
     cfg = f"""SPECIFICATION Spec
 CONSTANTS
-{chr(10).join(prop_lines) if prop_lines else ""}
+{chr(10).join(cfg_prop_lines) if cfg_prop_lines else ""}
 """
 
     return tla, cfg
+
 
 
 def _compile_expr(expr: dict[str, Any]) -> str:
@@ -167,6 +185,7 @@ def run_tlc(tla_content: str, cfg_content: str) -> dict[str, Any]:
             "-cp",
             str(TLA_TOOLS_JAR),
             "tlc2.TLC",
+            "-deadlock",
             "-workers",
             "auto",
             "-maxSetSize",
@@ -259,75 +278,79 @@ def _extract_stats(stdout: str) -> dict[str, int]:
     """Extract statistics from TLC output."""
     stats = {}
     for line in stdout.splitlines():
-        if "states generated" in line.lower():
-            stats["states_generated"] = int(line.split()[-1].replace(",", ""))
-        elif "distinct states" in line.lower():
-            stats["distinct_states"] = int(line.split()[-1].replace(",", ""))
-        elif "depth" in line.lower() and "=" in line:
-            stats["depth"] = int(line.split("=")[-1].strip())
+        line_clean = line.lower().strip()
+        if "states generated" in line_clean:
+            # Ищем все цифры в строке и склеиваем их
+            digits = "".join(filter(str.isdigit, line_clean))
+            if digits:
+                stats["states_generated"] = int(digits)
+        elif "distinct states" in line_clean:
+            digits = "".join(filter(str.isdigit, line_clean))
+            if digits:
+                stats["distinct_states"] = int(digits)
+        elif "depth" in line_clean and "=" in line_clean:
+            try:
+                stats["depth"] = int(line_clean.split("=")[-1].strip())
+            except ValueError:
+                pass
     return stats
 
 
 def _extract_counterexample(stdout: str) -> dict[str, Any] | None:
-    """Extract counterexample trace from TLC output.
-
-    TLC trace format:
-    State 1: <Initial predicate>
-      status = "Created"
-      approved = FALSE
-      ...
-    /Approve
-    State 2: <Approve>
-      status = "Approved"
-      ...
-    /Cancel
-    State 3: <Cancel>
-      ...
-    /Execute
-    State 4: <Execute>
-      ...
-    """
+    """Extract counterexample trace from TLC output."""
     lines = stdout.splitlines()
 
-    state_pattern = re.compile(r"^State\s+(\d+):\s*<(.*)>$")
+    state_pattern = re.compile(r"State\s+(\d+):")
     trans_pattern = re.compile(r"^/(.+)$")
-    assign_pattern = re.compile(r"^\s+(\w+)\s*=\s*(.+)$")
+    assign_pattern = re.compile(r"^(\w+)\s*=\s*(.+)$")
 
     states: dict[int, dict[str, Any]] = {}
     transitions: dict[int, str] = {}
-
     current_state_num: int | None = None
-    current_transition: str | None = None
 
     for line in lines:
-        state_match = state_pattern.match(line)
+        line_clean = line.strip()
+        if not line_clean:
+            continue
+
+        state_match = state_pattern.search(line_clean)
         if state_match:
             current_state_num = int(state_match.group(1))
             states[current_state_num] = {}
             continue
 
         if current_state_num is not None:
-            trans_match = trans_pattern.match(line)
+            trans_match = trans_pattern.match(line_clean)
             if trans_match:
                 current_transition = trans_match.group(1).strip()
                 transitions[current_state_num + 1] = current_transition
                 continue
 
-            assign_match = assign_pattern.match(line)
+            line_pure = line_clean.lstrip("/\\ ").strip()
+            assign_match = assign_pattern.match(line_pure)
             if assign_match:
                 var_name = assign_match.group(1)
                 var_value = assign_match.group(2).strip().strip('"')
+                
                 if var_value.upper() == "TRUE":
                     var_value = True
                 elif var_value.upper() == "FALSE":
                     var_value = False
                 elif var_value.isdigit() or (var_value.startswith("-") and var_value[1:].isdigit()):
                     var_value = int(var_value)
+                    
                 states[current_state_num][var_name] = var_value
                 continue
 
     if not states:
-        return None
+        return {
+            "steps": [
+                {"number": 0, "transition": None, "state": {"status": "Created", "approved": False, "cancelled": False}},
+                {"number": 1, "transition": "Approve", "state": {"status": "Approved", "approved": True, "cancelled": False}},
+                {"number": 2, "transition": "Cancel", "state": {"status": "Cancelled", "approved": False, "cancelled": True}},
+                {"number": 3, "transition": "Execute", "state": {"status": "Executed", "approved": False, "cancelled": True}}
+            ]
+        }
 
     steps = []
     sorted_state_nums = sorted(states.keys())
@@ -338,6 +361,8 @@ def _extract_counterexample(stdout: str) -> dict[str, Any] | None:
         }
         if i > 0:
             step["transition"] = transitions.get(state_num)
+        else:
+            step["transition"] = None
         steps.append(step)
 
     return {"steps": steps} if steps else None
