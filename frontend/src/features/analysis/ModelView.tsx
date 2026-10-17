@@ -6,7 +6,7 @@ import { formatDateTime } from '../../lib/format'
 import type { BehavioralModel, Expression, ModelVersion } from '../../types/api'
 import { PROPERTY_TYPE_LABELS } from './verificationStatus'
 
-const SECTION_TITLE_CLASS = 'text-micro font-semibold tracking-[0.14em] text-subtle uppercase'
+const SECTION_TITLE_CLASS = 'eyebrow'
 
 interface ModelSectionProps {
   title: string

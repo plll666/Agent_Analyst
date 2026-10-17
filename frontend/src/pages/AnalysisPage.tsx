@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 
+import { useDocumentTitle } from '../lib/useDocumentTitle'
+import { Icon } from '../components/Icon'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
 import { Skeleton } from '../components/Skeleton'
@@ -60,6 +62,8 @@ export function AnalysisPage() {
   const [isDetailsMounted, setIsDetailsMounted] = useState(false)
 
   const project = projectQuery.data ?? null
+
+  useDocumentTitle(project === null ? 'Анализ' : `${project.name} · Анализ`)
   const models = modelsQuery.data ?? []
   const verifications = verificationsQuery.data ?? []
 
@@ -198,7 +202,7 @@ export function AnalysisPage() {
   if (isFailing) {
     return (
       <EmptyState
-        icon="!"
+        icon={<Icon name="alert" className="size-5" />}
         title="Анализ недоступен"
         description={toUserMessage(failure)}
         className="flex-1"
@@ -214,7 +218,7 @@ export function AnalysisPage() {
   if (project === null) {
     return (
       <EmptyState
-        icon="!"
+        icon={<Icon name="alert" className="size-5" />}
         title="Проект не найден"
         description="Возможно, он удалён или принадлежит другому пользователю"
         className="flex-1"
@@ -240,7 +244,7 @@ export function AnalysisPage() {
           <div ref={heroRef} className="h-full">
             {selectedVerification === null ? (
               <EmptyState
-                icon="◷"
+                icon={<Icon name="clock" className="size-5" />}
                 title="Проверка ещё не запускалась"
                 description="Запустите проверку — она идёт в фоне, результат появится здесь сам, обновлять страницу не нужно."
                 className="h-full min-h-72"
@@ -257,6 +261,7 @@ export function AnalysisPage() {
               />
             ) : (
               <VerificationOutcome
+                key={selectedVerification.id}
                 verification={selectedVerification}
                 isDetailsOpen={isDetailsOpen}
                 onToggleDetails={handleToggleDetails}
@@ -303,9 +308,7 @@ export function AnalysisPage() {
           >
             {models.length > 1 ? (
               <div className="mb-4 flex flex-wrap items-center gap-2">
-                <span className="text-micro font-semibold tracking-[0.14em] text-subtle uppercase">
-                  Версия модели
-                </span>
+                <span className="eyebrow">Версия модели</span>
                 {models.map((model) => (
                   <button
                     key={model.id}

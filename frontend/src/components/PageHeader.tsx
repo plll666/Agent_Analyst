@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { Icon } from './Icon'
 
 export interface PageHeaderProps {
   eyebrow?: string
@@ -25,9 +26,10 @@ export function PageHeader({
           to={backTo}
           className="group -ms-2 inline-flex w-fit items-center gap-2 px-2 py-2 text-sm text-subtle transition-colors hover:text-fg"
         >
-          <span className="transition-transform duration-200 ease-out-expo group-hover:-translate-x-0.5">
-            ←
-          </span>
+          <Icon
+            name="arrow-left"
+            className="transition-transform duration-200 ease-out-expo group-hover:-translate-x-0.5"
+          />
           {backLabel}
         </Link>
       ) : null}
@@ -40,7 +42,7 @@ export function PageHeader({
             </p>
           ) : null}
 
-          <h1 className="text-title font-semibold tracking-tight break-words">{title}</h1>
+          <h1 className="text-title font-semibold break-words">{title}</h1>
 
           {description !== undefined ? (
             <p className="max-w-2xl text-sm leading-relaxed text-balance text-muted">

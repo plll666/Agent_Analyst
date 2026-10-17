@@ -1,8 +1,11 @@
 @import 'tailwindcss';
 
 @theme {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-sans:
+    'Golos Text Variable', 'Segoe UI', Roboto, 'Helvetica Neue', ui-sans-serif, system-ui,
+    sans-serif;
+  --font-mono:
+    'JetBrains Mono Variable', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
 
   --color-canvas: oklch(0.152 0.004 256);
   --color-canvas-deep: oklch(0.112 0.004 256);
@@ -29,6 +32,10 @@
   --color-grid-line: oklch(1 0 0 / 0.035);
   --color-halo: oklch(0.963 0.009 92 / 0.08);
 
+  --container-page-wide: 92rem;
+  --container-page-wider: 104rem;
+
+  --radius-control: 0.5rem;
   --radius-field: 0.75rem;
   --radius-card: 1rem;
   --radius-panel: 1.25rem;
@@ -38,9 +45,23 @@
   --shadow-glow: 0 12px 36px -20px oklch(0.963 0.009 92 / 0.4);
 
   --text-display: clamp(2.25rem, 1.2rem + 4.4vw, 3.75rem);
+  --text-display--line-height: 1.06;
+  --text-display--letter-spacing: -0.024em;
+  --text-display--font-weight: 600;
+
   --text-title: clamp(1.25rem, 1.05rem + 0.9vw, 1.625rem);
+  --text-title--line-height: 1.22;
+  --text-title--letter-spacing: -0.016em;
+
   --text-micro: 0.6875rem;
+  --text-micro--line-height: 1.4;
+
   --text-mono-body: 0.8125rem;
+  --text-mono-body--line-height: 1.65;
+
+  --leading-tight: 1.25;
+  --leading-snug: 1.4;
+  --leading-normal: 1.6;
 
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -53,8 +74,8 @@
   --color-surface: oklch(0.996 0.001 92);
   --color-raised: oklch(0.962 0.004 92);
   --color-overlay: oklch(0.922 0.006 92);
-  --color-line: oklch(0.852 0.007 92);
-  --color-line-strong: oklch(0.72 0.009 92);
+  --color-line: oklch(0.828 0.008 92);
+  --color-line-strong: oklch(0.7 0.01 92);
 
   --color-bone: oklch(0.222 0.008 256);
   --color-bone-soft: oklch(0.925 0.008 92);
@@ -73,7 +94,7 @@
   --color-grid-line: oklch(0.22 0.01 90 / 0.05);
   --color-halo: oklch(0.22 0.01 90 / 0.055);
 
-  --shadow-card: 0 1px 2px oklch(0.22 0.01 90 / 0.04), 0 10px 26px -20px oklch(0.22 0.01 90 / 0.22);
+  --shadow-card: 0 1px 2px oklch(0.22 0.01 90 / 0.05), 0 12px 28px -18px oklch(0.22 0.01 90 / 0.28);
   --shadow-panel:
     0 1px 2px oklch(0.22 0.01 90 / 0.05), 0 28px 64px -34px oklch(0.22 0.01 90 / 0.28);
   --shadow-glow: 0 10px 26px -16px oklch(0.22 0.01 90 / 0.3);
@@ -94,8 +115,39 @@
     background-color: var(--color-canvas);
     color: var(--color-fg);
     font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
+    font-weight: 400;
+    line-height: var(--leading-normal);
     text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 600;
+    letter-spacing: -0.014em;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+
+  input,
+  textarea,
+  select {
+    transition:
+      border-color 0.2s ease,
+      background-color 0.2s ease;
   }
 
   ::selection {
@@ -160,6 +212,31 @@
   border: 1px solid var(--color-line);
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-panel);
+}
+
+@utility eyebrow {
+  font-size: var(--text-micro);
+  line-height: var(--text-micro--line-height);
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--color-subtle);
+}
+
+@keyframes reveal-steps {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility reveal-steps {
+  animation: reveal-steps 0.35s var(--ease-out-expo) both;
 }
 
 @utility text-gradient {

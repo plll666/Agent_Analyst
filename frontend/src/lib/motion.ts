@@ -1,5 +1,7 @@
 export const MOTION_MEDIA = '(prefers-reduced-motion: no-preference)'
 
+export const canAnimate = (): boolean => document.visibilityState === 'visible'
+
 export const ANIMATION = {
   fast: 0.56,
   base: 0.9,

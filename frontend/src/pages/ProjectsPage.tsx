@@ -2,6 +2,8 @@ import { useRef, useState } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 
+import { useDocumentTitle } from '../lib/useDocumentTitle'
+import { Icon } from '../components/Icon'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
 import { PageHeader } from '../components/PageHeader'
@@ -14,6 +16,7 @@ import { pluralizeProjects } from '../lib/format'
 import { ANIMATION, MOTION_MEDIA } from '../lib/motion'
 
 export function ProjectsPage() {
+  useDocumentTitle('Проекты')
   const projectsQuery = useProjects()
   const rootRef = useRef<HTMLDivElement>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -82,7 +85,7 @@ export function ProjectsPage() {
 
       {projectsQuery.isError ? (
         <EmptyState
-          icon="!"
+          icon={<Icon name="alert" className="size-5" />}
           title="Не удалось загрузить проекты"
           description={toUserMessage(projectsQuery.error)}
           className="flex-1"
@@ -104,7 +107,7 @@ export function ProjectsPage() {
 
       {projects.length === 0 && projectsQuery.isSuccess ? (
         <EmptyState
-          icon="◇"
+          icon={<Icon name="inbox" className="size-5" />}
           title="Пока нет ни одного проекта"
           description="Создайте проект, вставьте текст требования — и сохраните первую версию. Дальше анализ пойдёт по версиям, а не по одному перезаписанному тексту."
           className="flex-1"

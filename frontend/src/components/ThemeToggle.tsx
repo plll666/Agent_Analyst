@@ -2,37 +2,13 @@ import { cn } from '../lib/cn'
 import { useTheme } from '../lib/themeContext'
 import type { ThemePreference } from '../lib/theme'
 import { Button } from './Button'
+import { Icon } from './Icon'
 
 const OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'system', label: 'Системная' },
   { value: 'light', label: 'Светлая' },
   { value: 'dark', label: 'Тёмная' },
 ]
-
-function SunIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="size-4" fill="none" strokeWidth="1.6">
-      <circle cx="12" cy="12" r="4" stroke="currentColor" />
-      <path
-        d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"
-        stroke="currentColor"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
-
-function MoonIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="size-4" fill="none" strokeWidth="1.6">
-      <path
-        d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"
-        stroke="currentColor"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
 
 export interface ThemeToggleProps {
   variant: 'icon' | 'segmented'
@@ -62,7 +38,7 @@ export function ThemeToggle({ variant, className }: ThemeToggleProps) {
               aria-pressed={isActive}
               onClick={() => setPreference(option.value)}
               className={cn(
-                'flex-1 rounded-[0.5rem] px-3 py-2 text-sm transition-colors duration-200 @md:flex-none',
+                'flex-1 rounded-field px-3 py-2 text-sm transition-colors duration-200 @md:flex-none',
                 isActive ? 'bg-bone text-ink' : 'text-muted hover:bg-raised hover:text-fg',
               )}
             >
@@ -84,7 +60,7 @@ export function ThemeToggle({ variant, className }: ThemeToggleProps) {
       aria-label={nextTheme === 'light' ? 'Включить светлую тему' : 'Включить тёмную тему'}
       title={preference === 'system' ? `Оформление: системное (${resolved})` : undefined}
     >
-      {resolved === 'dark' ? <MoonIcon /> : <SunIcon />}
+      <Icon name={resolved === 'dark' ? 'moon' : 'sun'} />
     </Button>
   )
 }

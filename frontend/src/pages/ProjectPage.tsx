@@ -1,5 +1,7 @@
 import { Link, useParams } from 'react-router-dom'
 
+import { useDocumentTitle } from '../lib/useDocumentTitle'
+import { Icon } from '../components/Icon'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
 import { Skeleton } from '../components/Skeleton'
@@ -16,6 +18,8 @@ export function ProjectPage() {
   const requirementsQuery = useRequirements(projectId)
 
   const project = projectQuery.data ?? null
+
+  useDocumentTitle(project === null ? 'Проект' : `${project.name} · Требования`)
   const versions = requirementsQuery.data ?? []
   const queryFailure = projectQuery.error ?? requirementsQuery.error
 
@@ -35,7 +39,7 @@ export function ProjectPage() {
   if (projectQuery.isError || requirementsQuery.isError) {
     return (
       <EmptyState
-        icon="!"
+        icon={<Icon name="alert" className="size-5" />}
         title="Проект недоступен"
         description={toUserMessage(queryFailure)}
         className="flex-1"
@@ -51,7 +55,7 @@ export function ProjectPage() {
   if (project === null) {
     return (
       <EmptyState
-        icon="!"
+        icon={<Icon name="alert" className="size-5" />}
         title="Проект не найден"
         description="Возможно, он удалён или принадлежит другому пользователю"
         className="flex-1"

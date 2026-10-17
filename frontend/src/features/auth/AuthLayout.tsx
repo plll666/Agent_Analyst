@@ -3,6 +3,7 @@ import type { PropsWithChildren, ReactNode } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 
+import { Icon } from '../../components/Icon'
 import { Logo } from '../../components/Logo'
 import { ANIMATION, MOTION_MEDIA } from '../../lib/motion'
 
@@ -80,7 +81,7 @@ export function AuthLayout({ headline, subline, highlights, footer, children }: 
             <span className="text-sm font-semibold tracking-tight">Agent Analyst</span>
           </div>
 
-          <h1 className="mt-10 text-display font-semibold tracking-tight">
+          <h1 className="mt-10 text-display font-semibold">
             {words.map((word, index) => (
               <span
                 key={`${word}-${index}`}
@@ -102,8 +103,8 @@ export function AuthLayout({ headline, subline, highlights, footer, children }: 
                 data-reveal="highlight"
                 className="flex items-center gap-3 text-sm text-muted"
               >
-                <span className="flex size-5 items-center justify-center rounded-full border border-bone/30 bg-bone-soft/50 text-micro text-bone">
-                  ✓
+                <span className="flex size-5 items-center justify-center rounded-full border border-bone/30 bg-bone-soft/50 text-bone">
+                  <Icon name="check" className="size-3" />
                 </span>
                 {highlight}
               </li>

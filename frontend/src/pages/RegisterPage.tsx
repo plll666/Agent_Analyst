@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { Button } from '../components/Button'
 import { Field } from '../components/Field'
 import { Input } from '../components/Input'
@@ -25,6 +26,7 @@ const EMPTY_ERRORS: FieldErrors = {
 }
 
 export function RegisterPage() {
+  useDocumentTitle('Регистрация')
   const navigate = useNavigate()
   const registerMutation = useRegister()
 

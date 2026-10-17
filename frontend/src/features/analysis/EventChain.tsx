@@ -1,4 +1,5 @@
 import type { VerificationCounterexample } from '../../types/api'
+import { Icon } from '../../components/Icon'
 
 export interface EventChainProps {
   counterexample: VerificationCounterexample
@@ -23,11 +24,7 @@ export function EventChain({ counterexample }: EventChainProps) {
           >
             {event}
           </span>
-          {index < lastIndex ? (
-            <span aria-hidden="true" className="text-subtle">
-              →
-            </span>
-          ) : null}
+          {index < lastIndex ? <Icon name="chevron" className="size-3.5 text-subtle" /> : null}
         </li>
       ))}
     </ol>

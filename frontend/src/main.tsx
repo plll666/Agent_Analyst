@@ -1,4 +1,4 @@
-import '@fontsource-variable/inter'
+import '@fontsource-variable/golos-text'
 import '@fontsource-variable/jetbrains-mono'
 import './index.css'
 

@@ -4,8 +4,18 @@ import { createPortal } from 'react-dom'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 
-import { ANIMATION, MOTION_MEDIA } from '../lib/motion'
+import { ANIMATION, MOTION_MEDIA, canAnimate } from '../lib/motion'
 import { Button } from './Button'
+import { Icon } from './Icon'
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
 
 export interface DialogProps {
   open: boolean
@@ -31,9 +41,44 @@ export function Dialog({
       return
     }
 
+    const container = containerRef.current
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+
+    container?.focus({ preventScroll: true })
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose()
+
+        return
+      }
+
+      if (event.key !== 'Tab' || container === null) {
+        return
+      }
+
+      const focusable = Array.from(
+        container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ).filter((element) => element.tabIndex >= 0 && element.offsetParent !== null)
+
+      const first = focusable[0]
+      const last = focusable.at(-1)
+
+      if (first === undefined || last === undefined) {
+        event.preventDefault()
+        container.focus()
+
+        return
+      }
+
+      const active = document.activeElement
+
+      if (event.shiftKey && (active === first || active === container)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
       }
     }
 
@@ -44,6 +89,7 @@ export function Dialog({
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
       document.body.style.overflow = previousOverflow
+      trigger?.focus({ preventScroll: true })
     }
   }, [open, onClose])
 
@@ -51,7 +97,7 @@ export function Dialog({
     () => {
       const container = containerRef.current
 
-      if (!open || container === null) {
+      if (!open || container === null || !canAnimate()) {
         return
       }
 
@@ -81,18 +127,20 @@ export function Dialog({
         className="fixed inset-0 cursor-default bg-canvas-deep/85 backdrop-blur-sm"
       />
       <div
+        ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="panel relative w-full max-w-lg p-6"
+        tabIndex={-1}
+        className="panel relative w-full max-w-lg p-6 focus:outline-none"
       >
         <header className="flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <h2 className="text-title font-semibold tracking-tight">{title}</h2>
+            <h2 className="text-title font-semibold">{title}</h2>
             {description !== null ? <p className="text-sm text-muted">{description}</p> : null}
           </div>
           <Button variant="ghost" size="sm" onClick={onClose} aria-label="Закрыть">
-            ✕
+            <Icon name="close" />
           </Button>
         </header>
 

@@ -1,7 +1,11 @@
+import { useState } from 'react'
+
 import { cn } from '../../lib/cn'
 import { formatDateTime } from '../../lib/format'
 import { VERIFICATION_STATUSES } from '../../types/api'
 import type { Verification } from '../../types/api'
+import { Icon } from '../../components/Icon'
+import { CounterexampleSteps } from './CounterexampleSteps'
 import { EventChain } from './EventChain'
 import { VerificationStatusBadge } from './VerificationStatusBadge'
 import {
@@ -48,7 +52,7 @@ function Scenario({ summary }: { summary: string }) {
 function AdviceBlock({ title, text }: { title: string; text: string }) {
   return (
     <div className="rounded-field border border-line bg-raised/30 px-4 py-3.5">
-      <p className="text-micro font-semibold tracking-[0.14em] text-subtle uppercase">{title}</p>
+      <p className="eyebrow">{title}</p>
       <p className="mt-1.5 text-sm leading-relaxed text-fg">{text}</p>
     </div>
   )
@@ -65,6 +69,8 @@ export function VerificationOutcome({
   isDetailsOpen,
   onToggleDetails,
 }: VerificationOutcomeProps) {
+  const [isStepsOpen, setIsStepsOpen] = useState(false)
+
   const meta = VERIFICATION_STATUS_META[verification.status]
   const isHolds = verification.status === VERIFICATION_STATUSES.propertyHolds
   const isInconclusive = INCONCLUSIVE_STATUSES.includes(verification.status)
@@ -77,7 +83,7 @@ export function VerificationOutcome({
           <span className="text-xs text-subtle">{formatDateTime(verification.created_at)}</span>
         </div>
 
-        <h2 className="text-title font-semibold tracking-tight">{meta.headline}</h2>
+        <h2 className="text-title font-semibold">{meta.headline}</h2>
         <p className="max-w-3xl text-sm leading-relaxed text-balance text-muted">
           {meta.explanation}
         </p>
@@ -90,18 +96,36 @@ export function VerificationOutcome({
       ) : null}
 
       <section className="flex flex-col gap-3">
-        <h3 className="text-micro font-semibold tracking-[0.14em] text-subtle uppercase">
-          Что произошло
-        </h3>
+        <h3 className="eyebrow">Что произошло</h3>
         <Scenario summary={verification.business_summary} />
       </section>
 
       {verification.counterexample === null ? null : (
         <section className="flex flex-col gap-3">
-          <h3 className="text-micro font-semibold tracking-[0.14em] text-subtle uppercase">
-            Цепочка событий
-          </h3>
+          <h3 className="eyebrow">Цепочка событий</h3>
           <EventChain counterexample={verification.counterexample} />
+
+          <button
+            type="button"
+            aria-expanded={isStepsOpen}
+            onClick={() => setIsStepsOpen((opened) => !opened)}
+            className="-ms-2 flex w-fit items-center gap-2 px-2 py-1.5 text-sm text-muted transition-colors hover:text-fg"
+          >
+            <Icon
+              name="chevron"
+              className={cn(
+                'transition-transform duration-200 ease-out-expo',
+                isStepsOpen && 'rotate-90',
+              )}
+            />
+            {isStepsOpen ? 'Скрыть состояния по шагам' : 'Показать состояния по шагам'}
+          </button>
+
+          {isStepsOpen ? (
+            <div className="reveal-steps">
+              <CounterexampleSteps counterexample={verification.counterexample} />
+            </div>
+          ) : null}
         </section>
       )}
 
@@ -115,9 +139,7 @@ export function VerificationOutcome({
 
       {verification.related_requirements.length === 0 ? null : (
         <section className="flex flex-col gap-3">
-          <h3 className="text-micro font-semibold tracking-[0.14em] text-subtle uppercase">
-            Связано с требованиями
-          </h3>
+          <h3 className="eyebrow">Связано с требованиями</h3>
           <ul className="flex flex-col gap-2">
             {verification.related_requirements.map((requirement) => (
               <li
@@ -161,14 +183,13 @@ export function VerificationOutcome({
           aria-expanded={isDetailsOpen}
           className="-ms-2 flex w-fit items-center gap-2 px-2 text-sm text-muted transition-colors hover:text-fg"
         >
-          <span
+          <Icon
+            name="chevron"
             className={cn(
               'transition-transform duration-200 ease-out-expo',
               isDetailsOpen && 'rotate-90',
             )}
-          >
-            →
-          </span>
+          />
           {isDetailsOpen ? 'Скрыть технические детали' : 'Показать технические детали'}
         </button>
       </div>

@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
 
+import { useDocumentTitle } from '../lib/useDocumentTitle'
+import { Icon } from '../components/Icon'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
 import { PageHeader } from '../components/PageHeader'
@@ -16,7 +18,7 @@ import {
   pluralizeViolations,
 } from '../lib/format'
 
-const SECTION_TITLE_CLASS = 'text-micro font-semibold tracking-[0.14em] text-subtle uppercase'
+const SECTION_TITLE_CLASS = 'eyebrow'
 
 interface StatTileProps {
   value: number
@@ -80,6 +82,7 @@ function AccountCard({
 }
 
 export function ProfilePage() {
+  useDocumentTitle('Профиль')
   const summaryQuery = useProfileSummary()
   const logout = useLogout()
   const summary = summaryQuery.data ?? null
@@ -103,7 +106,7 @@ export function ProfilePage() {
 
       {summaryQuery.isError ? (
         <EmptyState
-          icon="!"
+          icon={<Icon name="alert" className="size-5" />}
           title="Профиль недоступен"
           description={toUserMessage(summaryQuery.error)}
           className="flex-1"

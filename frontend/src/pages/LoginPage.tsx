@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { Button } from '../components/Button'
 import { Field } from '../components/Field'
 import { Input } from '../components/Input'
@@ -17,6 +18,7 @@ interface LoginFieldErrors {
 }
 
 export function LoginPage() {
+  useDocumentTitle('Вход')
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const loginMutation = useLogin()
@@ -123,9 +125,7 @@ export function LoginPage() {
 
       {isMockApiEnabled ? (
         <div className="mt-6 rounded-field border border-line bg-raised/60 p-3.5">
-          <p className="text-micro font-semibold tracking-[0.14em] text-subtle uppercase">
-            Демо-доступы
-          </p>
+          <p className="eyebrow">Демо-доступы</p>
           <p className="mt-2 font-mono text-xs text-muted">analyst@example.com · demo12345</p>
           <p className="font-mono text-xs text-muted">guest@example.com · demo12345</p>
           <button

@@ -5,7 +5,7 @@ import { CounterexampleSteps } from './CounterexampleSteps'
 import { ModelView } from './ModelView'
 import { PROPERTY_TYPE_LABELS } from './verificationStatus'
 
-const SECTION_TITLE_CLASS = 'text-micro font-semibold tracking-[0.14em] text-subtle uppercase'
+const SECTION_TITLE_CLASS = 'eyebrow'
 
 export interface VerificationDetailsProps {
   verification: Verification
