@@ -1,5 +1,4 @@
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -8,6 +7,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.database.models import Base
+from app.database.session import get_database_url
 
 config = context.config
 
@@ -15,25 +15,6 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
-
-
-def get_database_url() -> str:
-    """Взять URL БД из переменной `DATABASE_URL`.
-
-    Returns:
-        Строка подключения из переменной `DATABASE_URL`.
-
-    Raises:
-        RuntimeError: если переменная не задана — миграция без БД бессмысленна,
-            падать нужно сразу и с понятным текстом.
-    """
-    url = os.environ.get("DATABASE_URL", "").strip()
-    if not url:
-        raise RuntimeError(
-            "DATABASE_URL не задан. Пример: "
-            "postgresql+asyncpg://agent_analyst:agent_analyst@localhost:5432/agent_analyst"
-        )
-    return url
 
 
 def run_migrations_offline() -> None:

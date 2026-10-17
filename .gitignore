@@ -21,4 +21,5 @@ dist/
 *.iml
 .DS_Store
 logs/
+var/
 *.log

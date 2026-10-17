@@ -20,6 +20,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.domain.verification import VerificationStatus
+
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
     "uq": "uq_%(table_name)s_%(column_0_N_name)s",
@@ -28,15 +30,7 @@ NAMING_CONVENTION = {
     "pk": "pk_%(table_name)s",
 }
 
-VERIFICATION_STATUSES = (
-    "PENDING",
-    "PROPERTY_HOLDS",
-    "PROPERTY_VIOLATED",
-    "MODEL_INVALID",
-    "TIMEOUT",
-    "STATE_LIMIT_REACHED",
-    "ENGINE_ERROR",
-)
+VERIFICATION_STATUSES = tuple(str(status) for status in VerificationStatus)
 
 
 class Base(DeclarativeBase):
@@ -117,6 +111,7 @@ class Verification(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
     model_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("model_versions.id"))
     status: Mapped[str] = mapped_column(String(32))
+    property_id: Mapped[str | None] = mapped_column(String(32))
     engine: Mapped[str] = mapped_column(String(32))
     engine_version: Mapped[str | None] = mapped_column(String(64))
     counterexample: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -138,6 +133,7 @@ class Verification(Base):
         CheckConstraint("model_auto_edited = false", name="ck_verifications_model_auto_edited"),
         Index("ix_verifications_project_created", "project_id", text("created_at DESC")),
         Index("ix_verifications_model_version_id", "model_version_id"),
+        Index("ix_verifications_project_property", "project_id", "property_id"),
     )
 
 
