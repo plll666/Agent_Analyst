@@ -83,10 +83,16 @@ export function AnalysisPage() {
 
   useGSAP(
     () => {
+      const root = rootRef.current
+
+      if (root === null) {
+        return
+      }
+
       const media = gsap.matchMedia()
 
       media.add(MOTION_MEDIA, () => {
-        gsap.from('[data-panel]', {
+        gsap.from(Array.from(root.querySelectorAll<HTMLElement>('[data-panel]')), {
           y: 18,
           opacity: 0,
           duration: ANIMATION.base,
@@ -95,7 +101,7 @@ export function AnalysisPage() {
         })
       })
     },
-    { scope: rootRef },
+    { scope: rootRef, dependencies: [isLoading] },
   )
 
   useGSAP(
@@ -188,7 +194,7 @@ export function AnalysisPage() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-1 flex-col gap-6 lg:gap-8">
+      <div ref={rootRef} className="flex flex-1 flex-col gap-6 lg:gap-8">
         <div className="flex flex-col gap-3">
           <Skeleton className="h-3 w-24" />
           <Skeleton className="h-8 w-72 max-w-full" />
@@ -201,33 +207,37 @@ export function AnalysisPage() {
 
   if (isFailing) {
     return (
-      <EmptyState
-        icon={<Icon name="alert" className="size-5" />}
-        title="Анализ недоступен"
-        description={toUserMessage(failure)}
-        className="flex-1"
-        action={
-          <Link to="/projects">
-            <Button variant="secondary">Вернуться к проектам</Button>
-          </Link>
-        }
-      />
+      <div ref={rootRef} className="flex flex-1 flex-col gap-6 lg:gap-8">
+        <EmptyState
+          icon={<Icon name="alert" className="size-5" />}
+          title="Анализ недоступен"
+          description={toUserMessage(failure)}
+          className="flex-1"
+          action={
+            <Link to="/projects">
+              <Button variant="secondary">Вернуться к проектам</Button>
+            </Link>
+          }
+        />
+      </div>
     )
   }
 
   if (project === null) {
     return (
-      <EmptyState
-        icon={<Icon name="alert" className="size-5" />}
-        title="Проект не найден"
-        description="Возможно, он удалён или принадлежит другому пользователю"
-        className="flex-1"
-        action={
-          <Link to="/projects">
-            <Button variant="secondary">Вернуться к проектам</Button>
-          </Link>
-        }
-      />
+      <div ref={rootRef} className="flex flex-1 flex-col gap-6 lg:gap-8">
+        <EmptyState
+          icon={<Icon name="alert" className="size-5" />}
+          title="Проект не найден"
+          description="Возможно, он удалён или принадлежит другому пользователю"
+          className="flex-1"
+          action={
+            <Link to="/projects">
+              <Button variant="secondary">Вернуться к проектам</Button>
+            </Link>
+          }
+        />
+      </div>
     )
   }
 

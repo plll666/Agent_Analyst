@@ -27,15 +27,27 @@ export function RequirementWorkspace({ projectId, versions }: RequirementWorkspa
 
   useGSAP(
     () => {
+      const root = rootRef.current
+
+      if (root === null) {
+        return
+      }
+
       const media = gsap.matchMedia()
 
       media.add(MOTION_MEDIA, () => {
-        gsap.from('[data-panel]', {
+        const targets = Array.from(root.querySelectorAll('[data-panel]'))
+
+        if (targets.length === 0) {
+          return
+        }
+
+        gsap.from(targets, {
           y: 18,
           opacity: 0,
           duration: ANIMATION.base,
           ease: 'power3.out',
-          stagger: 0.1,
+          stagger: ANIMATION.stagger,
         })
       })
     },

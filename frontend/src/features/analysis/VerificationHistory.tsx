@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 
@@ -18,12 +19,25 @@ export function VerificationHistory({
   selectedId,
   onSelect,
 }: VerificationHistoryProps) {
+  const rootRef = useRef<HTMLUListElement>(null)
   useGSAP(
     () => {
+      const root = rootRef.current
+
+      if (root === null) {
+        return
+      }
+
       const media = gsap.matchMedia()
 
       media.add(MOTION_MEDIA, () => {
-        gsap.from('[data-run-item]', {
+        const targets = Array.from(root.querySelectorAll('[data-run-item]'))
+
+        if (targets.length === 0) {
+          return
+        }
+
+        gsap.from(targets, {
           x: 12,
           opacity: 0,
           duration: ANIMATION.fast,
@@ -32,7 +46,7 @@ export function VerificationHistory({
         })
       })
     },
-    { dependencies: [verifications.length] },
+    { scope: rootRef, dependencies: [verifications.length] },
   )
 
   return (
@@ -42,7 +56,10 @@ export function VerificationHistory({
         <span className="text-micro text-subtle">{pluralizeRuns(verifications.length)}</span>
       </header>
 
-      <ul className="flex max-h-[26rem] min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+      <ul
+        ref={rootRef}
+        className="flex max-h-[26rem] min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2"
+      >
         {verifications.map((verification) => {
           const isSelected = verification.id === selectedId
 

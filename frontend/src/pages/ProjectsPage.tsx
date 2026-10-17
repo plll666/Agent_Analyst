@@ -26,18 +26,36 @@ export function ProjectsPage() {
 
   useGSAP(
     () => {
+      const root = rootRef.current
+
+      if (root === null) {
+        return
+      }
+
       const media = gsap.matchMedia()
 
       media.add(MOTION_MEDIA, () => {
-        gsap.from('[data-page-intro]', {
+        const intro = Array.from(root.querySelectorAll('[data-page-intro]'))
+
+        if (intro.length === 0) {
+          return
+        }
+
+        gsap.from(intro, {
           y: 18,
           opacity: 0,
           duration: ANIMATION.base,
           ease: 'power3.out',
-          stagger: 0.08,
+          stagger: ANIMATION.stagger,
         })
 
-        gsap.from('[data-project-card]', {
+        const cards = Array.from(root.querySelectorAll('[data-project-card]'))
+
+        if (cards.length === 0) {
+          return
+        }
+
+        gsap.from(cards, {
           y: 22,
           opacity: 0,
           duration: ANIMATION.base,

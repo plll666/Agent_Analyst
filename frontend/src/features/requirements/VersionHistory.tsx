@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 
@@ -14,12 +15,26 @@ export interface VersionHistoryProps {
 }
 
 export function VersionHistory({ versions, selectedId, onSelect }: VersionHistoryProps) {
+  const rootRef = useRef<HTMLUListElement>(null)
+
   useGSAP(
     () => {
+      const root = rootRef.current
+
+      if (root === null) {
+        return
+      }
+
       const media = gsap.matchMedia()
 
       media.add(MOTION_MEDIA, () => {
-        gsap.from('[data-version-item]', {
+        const targets = Array.from(root.querySelectorAll('[data-version-item]'))
+
+        if (targets.length === 0) {
+          return
+        }
+
+        gsap.from(targets, {
           x: -14,
           opacity: 0,
           duration: ANIMATION.fast,
@@ -38,7 +53,10 @@ export function VersionHistory({ versions, selectedId, onSelect }: VersionHistor
         <Badge tone="neutral">{versions.length}</Badge>
       </header>
 
-      <ul className="flex max-h-[22rem] flex-col gap-1 overflow-y-auto p-2 @2xl:max-h-[30rem]">
+      <ul
+        ref={rootRef}
+        className="flex max-h-[22rem] flex-col gap-1 overflow-y-auto p-2 @2xl:max-h-[30rem]"
+      >
         {versions.map((version) => {
           const isSelected = version.id === selectedId
 
