@@ -1,9 +1,23 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Agent Analyst</title>
+    <script>
+      ;(() => {
+        try {
+          const stored = window.localStorage.getItem('agent-analyst-theme')
+          const preferred = window.matchMedia('(prefers-color-scheme: dark)').matches
+          const theme =
+            stored === 'light' || stored === 'dark' ? stored : preferred ? 'dark' : 'light'
+          document.documentElement.dataset.theme = theme
+        } catch {
+          document.documentElement.dataset.theme = 'dark'
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
