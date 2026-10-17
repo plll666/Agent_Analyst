@@ -51,10 +51,10 @@ function Scenario({ summary }: { summary: string }) {
 
 function AdviceBlock({ title, text }: { title: string; text: string }) {
   return (
-    <div className="rounded-field border border-line bg-raised/30 px-4 py-3.5">
-      <p className="eyebrow">{title}</p>
+    <section className="rounded-field border border-line bg-raised/30 px-4 py-3.5">
+      <h3 className="eyebrow">{title}</h3>
       <p className="mt-1.5 text-sm leading-relaxed text-fg">{text}</p>
-    </div>
+    </section>
   )
 }
 
