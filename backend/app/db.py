@@ -21,6 +21,12 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
             raise
 
 
+async def get_session() -> AsyncIterator[AsyncSession]:
+    """Зависимость FastAPI: сессия на запрос."""
+    async with session_scope() as session:
+        yield session
+
+
 async def dispose_engine() -> None:
     """Закрыть пул соединений при остановке процесса."""
     await _engine.dispose()

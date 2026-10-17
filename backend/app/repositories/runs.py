@@ -6,6 +6,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import Artifact, ModelVersion, Project, Verification
+from app.domain.verification import (
+    Counterexample,
+    RelatedRequirement,
+    Statistics,
+    VerificationExplanation,
+    VerificationResult,
+    VerificationStatus,
+)
+from app.domain.verification import (
+    Verification as DomainVerification,
+)
 
 
 async def create_model_version(
@@ -193,3 +204,34 @@ async def create_artifact(
     session.add(record)
     await session.flush()
     return record
+
+
+def verification_to_domain(record: Verification) -> DomainVerification:
+    """Собрать доменный агрегат из строки прогона.
+
+    Чтение прогоняется через доменную валидацию: испорченная строка падает здесь, а не
+    уезжает на фронт в виде ответа, который тот не сможет разобрать.
+    """
+    result = VerificationResult(
+        status=VerificationStatus(record.status),
+        property_id=record.property_id,
+        engine=record.engine,
+        engine_version=record.engine_version,
+        statistics=Statistics.model_validate(record.statistics) if record.statistics else None,
+        counterexample=(
+            Counterexample.model_validate(record.counterexample) if record.counterexample else None
+        ),
+        related_requirements=(
+            tuple(RelatedRequirement.model_validate(item) for item in record.related_requirements)
+            if record.related_requirements
+            else None
+        ),
+        duration_ms=record.duration_ms,
+        error_detail=record.error_detail,
+    )
+    explanation = VerificationExplanation(
+        business_summary=record.business_summary,
+        hypothesis=record.hypothesis,
+        question=record.question,
+    )
+    return DomainVerification(result=result, explanation=explanation)

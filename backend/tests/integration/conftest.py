@@ -4,13 +4,21 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
+from app.db import get_session
+from app.main import app
 from app.repositories import users
+
+
+def _email(name: str) -> str:
+    """Уникальный адрес на прогон: тесты делят одну базу между запусками."""
+    return f"{name}-{uuid.uuid4().hex}@example.com"
 
 
 def _database_url() -> str:
@@ -83,18 +91,14 @@ async def session(database_state: str, database_url: str) -> AsyncIterator[Async
 @pytest_asyncio.fixture
 async def owner_id(session: AsyncSession) -> uuid.UUID:
     """Владелец проектов. Реальный пользователь: на ``projects.owner_id`` сторит FK."""
-    user = await users.create(
-        session, email=f"owner-{uuid.uuid4().hex}@example.com", password_hash="hash"
-    )
+    user = await users.create(session, email=_email("owner"), password_hash="hash")
     return user.id
 
 
 @pytest_asyncio.fixture
 async def stranger_id(session: AsyncSession) -> uuid.UUID:
     """Чужой пользователь: проверяет, что данные отфильтровываются по владельцу."""
-    user = await users.create(
-        session, email=f"stranger-{uuid.uuid4().hex}@example.com", password_hash="hash"
-    )
+    user = await users.create(session, email=_email("stranger"), password_hash="hash")
     return user.id
 
 
@@ -115,3 +119,29 @@ def case_document() -> dict[str, Any]:
         ],
         "properties": [{"id": "P1", "type": "reachable", "expression": {"var": "status"}}],
     }
+
+
+@pytest_asyncio.fixture
+async def client(session: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:
+    """Клиент по приложению: те же роутеры и хендлеры, что и в uvicorn.
+
+    ``get_session`` подменён на тестовую сессию, но ``get_current_user`` из неё же
+    берёт пользователя — авторизация проверяется по-настоящему.
+    """
+    app.dependency_overrides[get_session] = lambda: session
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http_client:
+        yield http_client
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def registered(client: httpx.AsyncClient) -> httpx.AsyncClient:
+    """Клиент с cookie только что зарегистрированного пользователя."""
+    response = await client.post(
+        "/api/auth/register",
+        json={"email": _email("owner"), "password": "correct-horse", "display_name": "Анна"},
+    )
+    assert response.status_code == 201, response.text
+    assert "session" in response.cookies
+    return client

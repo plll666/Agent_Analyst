@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://agent_analyst:agent_analyst@localhost:5432/agent_analyst"
     )
+    secret_key: str = "dev-secret-key-change-me-32-bytes"
+    access_token_ttl_minutes: int = 60
+    cookie_secure: bool = False
 
 
 @lru_cache
