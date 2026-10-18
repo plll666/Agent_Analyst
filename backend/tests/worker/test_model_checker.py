@@ -8,6 +8,7 @@
 import asyncio
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -19,7 +20,7 @@ from tests.worker.support import JAR, requires_java
 pytestmark = [pytest.mark.integration, requires_java]
 
 
-def _model(document: dict) -> BehavioralModel:
+def _model(document: dict[str, Any]) -> BehavioralModel:
     return BehavioralModel.model_validate(document)
 
 

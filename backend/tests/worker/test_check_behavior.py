@@ -1,5 +1,9 @@
 """Приёмка задачи 2: ``check_behavior`` и запись результата в ``verifications``.
 
+Тесты, которым нужен сам TLC, помечены ``requires_java``: без jar они пропускаются,
+а не падают с ``ENGINE_ERROR``. Остальные проверяют путь до движка — невалидную
+модель, отсутствующий jar, тексты статусов — и работают без Java.
+
 Тесты повторяют критерии приёмки из кейса: acceptance test 1 даёт
 ``PROPERTY_VIOLATED`` с контрпримером ``Created → Approve → Cancel → Execute``,
 test 2 — ``PROPERTY_HOLDS``, и строка лежит в базе. Плюс проверяется то, что
@@ -29,6 +33,7 @@ from tests.worker.support import (
 pytestmark = [pytest.mark.integration]
 
 
+@requires_java
 async def test_violated_model_writes_row_with_counterexample(
     worker_ctx: dict[str, Any], seeded_run: SeededRun, sessions: Any
 ) -> None:
@@ -50,6 +55,7 @@ async def test_violated_model_writes_row_with_counterexample(
     assert steps[-1]["state"]["status"] == "Executed"
 
 
+@requires_java
 async def test_fixed_model_writes_property_holds(
     worker_ctx: dict[str, Any], seeded_run: SeededRun, sessions: Any
 ) -> None:
@@ -66,6 +72,7 @@ async def test_fixed_model_writes_property_holds(
     assert row.business_summary.strip()
 
 
+@requires_java
 async def test_property_holds_summary_cautions_about_scope(
     worker_ctx: dict[str, Any], seeded_run: SeededRun, sessions: Any
 ) -> None:
