@@ -27,7 +27,7 @@ async def summary(
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> ProfileSummaryOut:
-    """Один агрегирующий запрос вместо N+1: счётчики требуют обхода всех проектов."""
+    """Счётчики профиля одним агрегирующим запросом."""
     projects_count = await session.scalar(
         select(func.count()).select_from(Project).where(Project.owner_id == user.id)
     )

@@ -1,19 +1,23 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.api import analysis, auth, profile, projects
-from app.db import dispose_engine
+from app.db import dispose_engine, open_database
 from app.errors import install_exception_handlers
+from app.queue import close_queue, open_queue
 
 API_PREFIX = "/api"
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Закрыть пул соединений при остановке процесса."""
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+    """Поднять пул БД и брокер, оба закрыть при остановке процесса."""
+    open_database()
+    await open_queue()
     yield
+    await close_queue()
     await dispose_engine()
 
 

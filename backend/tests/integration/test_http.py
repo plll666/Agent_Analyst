@@ -8,11 +8,12 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import auth
 from app.api.projects import ProjectOut
-from app.auth import MIN_PASSWORD_LENGTH
+from app.auth import MIN_PASSWORD_LENGTH, PASSWORD_DUMMY_HASH, verify_password
 from app.errors import install_exception_handlers
 from app.repositories import projects as projects_repo
-from app.repositories import runs
+from app.repositories import runs, users
 from tests.integration.conftest import case_document
 
 pytestmark = pytest.mark.integration
@@ -80,6 +81,24 @@ async def test_register_rejects_taken_email(client: httpx.AsyncClient) -> None:
     assert _code(second) == "EMAIL_TAKEN"
 
 
+async def test_concurrent_registration_of_same_email_returns_conflict(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Гонка: единственный барьер — уникальный индекс."""
+    payload = {"email": "race@example.com", "password": "correct-horse"}
+    assert (await client.post("/api/auth/register", json=payload)).status_code == 201
+
+    async def always_free(_session: AsyncSession, _email: str) -> None:
+        return None
+
+    monkeypatch.setattr(users, "get_by_email_lower", always_free)
+
+    raced = await client.post("/api/auth/register", json=payload)
+
+    assert raced.status_code == 409
+    assert _code(raced) == "EMAIL_TAKEN"
+
+
 async def test_login_accepts_own_credentials(client: httpx.AsyncClient) -> None:
     await client.post(
         "/api/auth/register",
@@ -115,6 +134,30 @@ async def test_login_failure_does_not_reveal_whether_email_exists(
     assert wrong_password.status_code == 401
     assert unknown_email.status_code == 401
     assert _code(wrong_password) == _code(unknown_email) == "INVALID_CREDENTIALS"
+
+
+async def test_unknown_email_still_spends_time_on_password_check(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Несуществующий email не должен проверяться быстрее существующего."""
+    await client.post(
+        "/api/auth/register",
+        json={"email": "timing@example.com", "password": "correct-horse"},
+    )
+    checked: list[tuple[str, str]] = []
+    original = verify_password
+
+    def spy(password: str, password_hash: str) -> bool:
+        checked.append((password, password_hash))
+        return original(password, password_hash)
+
+    monkeypatch.setattr(auth, "verify_password", spy)
+
+    await client.post("/api/auth/login", json={"email": "timing@example.com", "password": "wrong"})
+    await client.post("/api/auth/login", json={"email": "ghost@example.com", "password": "any"})
+
+    assert len(checked) == 2, "пароль не проверен ни для одной из веток"
+    assert checked[1][1] == PASSWORD_DUMMY_HASH
 
 
 async def test_logout_ends_the_session(registered: httpx.AsyncClient) -> None:
@@ -299,9 +342,10 @@ async def test_start_verification_without_model_is_422(registered: httpx.AsyncCl
     assert _code(response) == "VALIDATION_ERROR"
 
 
-async def test_start_verification_reports_engine_error_from_stub(
+async def test_start_verification_returns_pending_run(
     registered: httpx.AsyncClient, session: AsyncSession
 ) -> None:
+    """Запуск отдаёт PENDING: результат проверки пишет воркер, а не HTTP-запрос."""
     project = await _new_project(registered)
     await _seed_model(session, project["id"])
 
@@ -309,11 +353,24 @@ async def test_start_verification_reports_engine_error_from_stub(
 
     assert response.status_code == 201, response.text
     body = response.json()
-    assert body["status"] == "ENGINE_ERROR"
-    assert body["engine"] == "stub"
-    assert body["property_id"]
-    assert body["error_detail"]
+    assert body["status"] == "PENDING"
+    assert body["business_summary"] == ""
     assert body["project_id"] == project["id"]
+    assert body["model_version_id"]
+    assert "counterexample" not in body
+    assert "property_id" not in body
+
+
+async def test_start_verification_enqueues_the_run(
+    registered: httpx.AsyncClient, session: AsyncSession, enqueued: list[str]
+) -> None:
+    """В очередь кладётся именно эта строка: воркер читает модель по её id."""
+    project = await _new_project(registered)
+    await _seed_model(session, project["id"])
+
+    created = (await registered.post(f"/api/projects/{project['id']}/verifications")).json()
+
+    assert enqueued == [created["id"]]
 
 
 async def test_started_verification_is_readable_afterwards(
@@ -326,7 +383,7 @@ async def test_started_verification_is_readable_afterwards(
     listed = await registered.get(f"/api/projects/{project['id']}/verifications")
 
     assert [item["id"] for item in listed.json()["items"]] == [created["id"]]
-    assert listed.json()["items"][0]["status"] == "ENGINE_ERROR"
+    assert listed.json()["items"][0]["status"] == "PENDING"
 
 
 async def test_model_versions_are_exposed_for_owner(
@@ -402,7 +459,7 @@ async def test_unknown_project_id_must_be_uuid(registered: httpx.AsyncClient) ->
 async def test_wrong_method_is_not_reported_as_validation_error(
     registered: httpx.AsyncClient,
 ) -> None:
-    """Код ошибки метода не должен выдаваться за ошибку данных запроса."""
+    """Код ошибки метода не должен выдаваться за ошибку данных."""
     response = await registered.delete("/api/projects")
 
     assert response.status_code == 405
@@ -410,7 +467,7 @@ async def test_wrong_method_is_not_reported_as_validation_error(
 
 
 async def test_short_password_is_rejected_by_shared_constant(client: httpx.AsyncClient) -> None:
-    """Правило длины живёт в ``auth.MIN_PASSWORD_LENGTH``, а не в DTO."""
+    """Правило длины живёт в ``auth.MIN_PASSWORD_LENGTH``."""
     response = await client.post(
         "/api/auth/register",
         json={"email": "short@example.com", "password": "x" * (MIN_PASSWORD_LENGTH - 1)},
@@ -432,13 +489,13 @@ async def test_password_of_exactly_minimum_length_is_accepted(
 
 
 async def test_response_model_mismatch_is_reported_as_internal_error() -> None:
-    """Ответ, не сошедшийся с ``response_model``, — 500, а не 422."""
+    """Ответ, не сошедшийся с ``response_model``, — 500."""
     mismatched = FastAPI()
     install_exception_handlers(mismatched)
 
     @mismatched.get("/broken", response_model=ProjectOut)
     async def broken() -> dict[str, str]:
-        """Отдаёт словарь без обязательных полей ``ProjectOut``."""
+        """Словарь без обязательных полей ``ProjectOut``."""
         return {"name": "без идентичности"}
 
     transport = httpx.ASGITransport(app=mismatched)

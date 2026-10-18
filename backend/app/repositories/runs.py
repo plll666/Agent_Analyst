@@ -32,7 +32,7 @@ async def create_model_version(
     parent_version_id: uuid.UUID | None = None,
     created_by: uuid.UUID | None = None,
 ) -> ModelVersion:
-    """Сохранить интерпретацию агента как объект. ``created_by`` заполняет система."""
+    """Сохранить интерпретацию агента как объект."""
     record = ModelVersion(
         id=uuid.uuid4(),
         project_id=project_id,
@@ -54,7 +54,7 @@ async def create_model_version(
 async def latest_model_version(
     session: AsyncSession, project_id: uuid.UUID, owner_id: uuid.UUID
 ) -> ModelVersion | None:
-    """Последняя версия модели проекта: её и проверяет запускатель прогона."""
+    """Последняя версия модели проекта."""
     statement = (
         select(ModelVersion)
         .join(Project, Project.id == ModelVersion.project_id)
@@ -68,7 +68,7 @@ async def latest_model_version(
 async def list_models_for_owner(
     session: AsyncSession, project_id: uuid.UUID, owner_id: uuid.UUID
 ) -> list[ModelVersion]:
-    """Версии модели по убыванию: экран берёт первую как текущую."""
+    """Версии модели по убыванию."""
     statement = (
         select(ModelVersion)
         .join(Project, Project.id == ModelVersion.project_id)
@@ -85,10 +85,7 @@ async def create_pending_verification(
     model_version_id: uuid.UUID,
     engine: str,
 ) -> Verification:
-    """Завести прогон в статусе ``PENDING`` до похода в очередь.
-
-    ``business_summary`` пустой: объяснять ещё нечего, а колонка ``NOT NULL``.
-    """
+    """Завести прогон в статусе ``PENDING``; ``business_summary`` пока пуст."""
     record = Verification(
         id=uuid.uuid4(),
         project_id=project_id,
@@ -106,7 +103,7 @@ async def create_pending_verification(
 async def list_verifications(
     session: AsyncSession, project_id: uuid.UUID, owner_id: uuid.UUID
 ) -> list[Verification]:
-    """Прогоны проекта, новые сверху — по ним фронт рисует историю."""
+    """Прогоны проекта, новые сверху."""
     statement = (
         select(Verification)
         .join(Project, Project.id == Verification.project_id)
@@ -152,11 +149,7 @@ async def save_result(
     hypothesis: str | None = None,
     question: str | None = None,
 ) -> Verification | None:
-    """Записать результат проверки.
-
-    ``model_auto_edited`` не затрагивается: правило «агент не правит модель» выразимо
-    только как ``CHECK ... = false`` в БД, пути записи ``true`` здесь нет.
-    """
+    """Записать результат проверки в строку прогона."""
     record = await get_verification(session, verification_id)
     if record is None:
         return None
@@ -207,11 +200,7 @@ async def create_artifact(
 
 
 def verification_to_domain(record: Verification) -> DomainVerification:
-    """Собрать доменный агрегат из строки прогона.
-
-    Чтение прогоняется через доменную валидацию: испорченная строка падает здесь, а не
-    уезжает на фронт в виде ответа, который тот не сможет разобрать.
-    """
+    """Собрать доменный агрегат из строки прогона."""
     result = VerificationResult(
         status=VerificationStatus(record.status),
         property_id=record.property_id,

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://agent_analyst:agent_analyst@localhost:5432/agent_analyst"
     )
+    redis_url: str = "redis://localhost:6379/0"
     secret_key: str = "dev-secret-key-change-me-32-bytes"
     access_token_ttl_minutes: int = 60
     cookie_secure: bool = False
@@ -18,5 +19,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Настройки один раз на процесс — движок создаётся один раз."""
+    """Настройки один раз на процесс."""
     return Settings()

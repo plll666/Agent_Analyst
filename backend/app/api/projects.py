@@ -63,11 +63,7 @@ def _requirement_out(requirement: Requirement) -> RequirementOut:
 
 
 async def _owned_project(session: AsyncSession, project_id: uuid.UUID, user: User) -> Project:
-    """Проект с проверкой владельца.
-
-    Отсутствие проекта и чужой проект различаются: ``id`` чужого проекта известен клиенту,
-    скрывать существование не требуется.
-    """
+    """Проект с проверкой владельца: чужой даёт 403, отсутствующий — 404."""
     await _assert_project_exists(session, project_id)
     project = await projects.get_for_owner(session, project_id, user.id)
     if project is None:
@@ -161,7 +157,7 @@ async def add_requirement(
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> RequirementOut:
-    """Новая версия, а не правка прежней: текст первой версии остаётся неизменным."""
+    """Новая версия требования; прежние остаются неизменными."""
     await _owned_project(session, project_id, user)
     created = await projects.add_requirement_version(
         session, project_id, raw_text=payload.raw_text, created_by=user.id

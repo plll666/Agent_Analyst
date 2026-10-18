@@ -20,6 +20,10 @@ MIN_PASSWORD_LENGTH = 8
 
 _hasher = PasswordHasher()
 
+# Хеш настоящего пароля, никогда не выдаваемый за чей-то: им проверяют пароль при
+# попытке входа с несуществующим email, чтобы обе ветки занимали одинаковое время.
+PASSWORD_DUMMY_HASH = _hasher.hash("пароль-не-существует-ни-у-кого")
+
 
 def hash_password(password: str) -> str:
     """Argon2id в формате PHC: соль и параметры внутри хеша."""

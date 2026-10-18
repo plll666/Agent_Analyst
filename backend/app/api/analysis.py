@@ -7,16 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.projects import _owned_project
 from app.auth import get_current_user
-from app.checker import StubChecker
 from app.database.models import ModelVersion, User
+from app.database.models import Verification as VerificationRecord
 from app.db import get_session
 from app.domain.behavioral_model import BehavioralModel
-from app.domain.verification import Verification
 from app.errors import VALIDATION_ERROR, ApiError
+from app.queue import enqueue_check
 from app.repositories import runs
 from app.repositories.runs import verification_to_domain
 
 router = APIRouter(tags=["analysis"])
+
+ENGINE_WHEN_RUN = "TLC"
 
 
 class ModelVersionOut(BaseModel):
@@ -45,9 +47,9 @@ def _model_out(record: ModelVersion) -> ModelVersionOut:
     )
 
 
-def _verification_out(record: Any, verification: Verification) -> dict[str, Any]:
-    """Плоский ресурс: домен уже свёрнут, остаётся добавить идентичность записи."""
-    payload = verification.model_dump(mode="json")
+def _verification_out(record: VerificationRecord) -> dict[str, Any]:
+    """Плоский ресурс прогона: домен уже свёрнут, остаётся идентичность записи."""
+    payload = verification_to_domain(record).model_dump(mode="json")
     payload.update(
         {
             "id": str(record.id),
@@ -65,7 +67,7 @@ async def list_models(
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, list[ModelVersionOut]]:
-    """Версии модели проекта по убыванию: экран берёт первую как текущую."""
+    """Версии модели проекта по убыванию."""
     await _owned_project(session, project_id, user)
     listed = await runs.list_models_for_owner(session, project_id, user.id)
     return {"items": [_model_out(item) for item in listed]}
@@ -77,12 +79,10 @@ async def list_verifications(
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Прогоны проекта с актуальными статусами, без кеша."""
+    """Прогоны проекта, новые сверху."""
     await _owned_project(session, project_id, user)
     listed = await runs.list_verifications(session, project_id, user.id)
-    return {
-        "items": [_verification_out(record, verification_to_domain(record)) for record in listed]
-    }
+    return {"items": [_verification_out(record) for record in listed]}
 
 
 @router.post(
@@ -94,10 +94,10 @@ async def start_verification(
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Заводит прогон, выполняет проверку и отдаёт терминальный результат.
+    """Создать прогон в статусе ``PENDING`` и поставить его в очередь.
 
-    Модель читается и валидируется здесь: движок получает ``BehavioralModel``, а не
-    произвольный JSON из базы.
+    Проверку выполняет воркер, а не этот запрос. Очередь пополняется после коммита,
+    иначе воркер заберёт задачу раньше, чем строка станет видна другим транзакциям.
     """
     await _owned_project(session, project_id, user)
     latest = await runs.latest_model_version(session, project_id, user.id)
@@ -108,33 +108,14 @@ async def start_verification(
         raise ApiError(422, VALIDATION_ERROR, f"Модель не прошла валидацию: {problems}")
 
     try:
-        model = BehavioralModel.model_validate(latest.document)
+        BehavioralModel.model_validate(latest.document)
     except ValidationError as error:
         raise ApiError(422, VALIDATION_ERROR, f"Модель не прошла валидацию: {error}") from error
 
     pending = await runs.create_pending_verification(
-        session, project_id=project_id, model_version_id=latest.id, engine="stub"
+        session, project_id=project_id, model_version_id=latest.id, engine=ENGINE_WHEN_RUN
     )
-    checker = StubChecker()
-    result = await checker.check(model, model.properties[0].id)
-    explanation = checker.explain()
-    await runs.save_result(
-        session,
-        pending.id,
-        status=result.status.value,
-        engine=result.engine,
-        business_summary=explanation.business_summary,
-        hypothesis=explanation.hypothesis,
-        question=explanation.question,
-        property_id=result.property_id,
-        engine_version=result.engine_version,
-        statistics=result.statistics.model_dump(mode="json") if result.statistics else None,
-        counterexample=(
-            result.counterexample.model_dump(mode="json") if result.counterexample else None
-        ),
-        related_requirements=None,
-        duration_ms=result.duration_ms,
-        error_detail=result.error_detail,
-    )
+    await session.commit()
+    await enqueue_check(str(pending.id))
     await session.refresh(pending)
-    return _verification_out(pending, Verification(result=result, explanation=explanation))
+    return _verification_out(pending)

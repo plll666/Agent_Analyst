@@ -5,6 +5,7 @@ x-backend-env: &backend-env
   REDIS_URL: redis://redis:6379/0
   SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-me-32-bytes}
   ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-60}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
   MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
   MINIO_BUCKET: ${MINIO_BUCKET:-agent-analyst-artifacts}
   MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agent_analyst}

@@ -10,6 +10,7 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.api import analysis
 from app.config import get_settings
 from app.db import get_session
 from app.main import app
@@ -17,22 +18,17 @@ from app.repositories import users
 
 
 def _email(name: str) -> str:
-    """Уникальный адрес на прогон: тесты делят одну базу между запусками."""
+    """Уникальный адрес на прогон."""
     return f"{name}-{uuid.uuid4().hex}@example.com"
 
 
 def _database_url() -> str:
-    """URL базы для интеграционных тестов.
-
-    ``TEST_DATABASE_URL`` задаёт отдельную базу, иначе берётся общий ``DATABASE_URL``.
-    Тесты пишут строки и не чистят их, поэтому указывать на рабочую базу приложения
-    не стоит.
-    """
+    """URL базы: ``TEST_DATABASE_URL``, иначе общий ``DATABASE_URL``."""
     return os.environ.get("TEST_DATABASE_URL") or get_settings().database_url
 
 
 def _probe_database(url: str) -> str:
-    """Разобраться с базой до тестов: недоступна, не мигрирована или готова.
+    """Разобраться с базой до тестов.
 
     Returns:
         ``"unavailable"``, ``"unmigrated"`` или ``"ready"``.
@@ -70,11 +66,7 @@ def database_state(database_url: str) -> str:
 
 @pytest_asyncio.fixture
 async def session(database_state: str, database_url: str) -> AsyncIterator[AsyncSession]:
-    """Сессия на настоящем Postgres.
-
-    Каждый тест заводит своих пользователей, поэтому порядок и число прогонов
-    на результат не влияют.
-    """
+    """Сессия на настоящем Postgres."""
     if database_state == "unavailable":
         pytest.skip(f"Postgres недоступен по {database_url}")
     if database_state == "unmigrated":
@@ -90,20 +82,20 @@ async def session(database_state: str, database_url: str) -> AsyncIterator[Async
 
 @pytest_asyncio.fixture
 async def owner_id(session: AsyncSession) -> uuid.UUID:
-    """Владелец проектов. Реальный пользователь: на ``projects.owner_id`` сторит FK."""
+    """Владелец проектов."""
     user = await users.create(session, email=_email("owner"), password_hash="hash")
     return user.id
 
 
 @pytest_asyncio.fixture
 async def stranger_id(session: AsyncSession) -> uuid.UUID:
-    """Чужой пользователь: проверяет, что данные отфильтровываются по владельцу."""
+    """Чужой пользователь."""
     user = await users.create(session, email=_email("stranger"), password_hash="hash")
     return user.id
 
 
 def case_document() -> dict[str, Any]:
-    """Модель из кейса: репозиторию она безразлична, важен только факт round-trip."""
+    """Модель из кейса."""
     return {
         "variables": [
             {"name": "status", "type": "enum", "values": ["Created", "Cancelled"]},
@@ -121,13 +113,27 @@ def case_document() -> dict[str, Any]:
     }
 
 
-@pytest_asyncio.fixture
-async def client(session: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:
-    """Клиент по приложению: те же роутеры и хендлеры, что и в uvicorn.
+@pytest.fixture
+def enqueued() -> list[str]:
+    """Идентификаторы прогонов, поставленных в очередь вместо arq.
 
-    ``get_session`` подменён на тестовую сессию, но ``get_current_user`` из неё же
-    берёт пользователя — авторизация проверяется по-настоящему.
+    Тесты не поднимают Redis: HTTP-слой проверяется, а брокер у воркера — отдельно.
     """
+    return []
+
+
+@pytest_asyncio.fixture
+async def client(
+    session: AsyncSession, enqueued: list[str], monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[httpx.AsyncClient]:
+    """Клиент по приложению: те же роутеры и хендлеры, что и в uvicorn."""
+
+    async def record(verification_id: str, **_kwargs: Any) -> None:
+        enqueued.append(verification_id)
+
+    # Подменяется именно в модуле роутера: enqueue_check вызывается напрямую, а не
+    # через Depends, поэтому app.dependency_overrides его не увидит.
+    monkeypatch.setattr(analysis, "enqueue_check", record)
     app.dependency_overrides[get_session] = lambda: session
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http_client:

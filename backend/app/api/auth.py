@@ -2,10 +2,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
     MIN_PASSWORD_LENGTH,
+    PASSWORD_DUMMY_HASH,
     clear_session_cookie,
     get_current_user,
     hash_password,
@@ -59,12 +61,17 @@ async def register(
     email = payload.email.strip().lower()
     if await users.get_by_email_lower(session, email) is not None:
         raise ApiError(status.HTTP_409_CONFLICT, EMAIL_TAKEN, "Email уже занят")
-    created = await users.create(
-        session,
-        email=email,
-        password_hash=hash_password(payload.password),
-        display_name=payload.display_name,
-    )
+    try:
+        created = await users.create(
+            session,
+            email=email,
+            password_hash=hash_password(payload.password),
+            display_name=payload.display_name,
+        )
+    except IntegrityError as duplicate:
+        # Проверка занятости выше — оптимизация, а не защита: при одновременной
+        # регистрации оба запроса её пройдут. Уникальный индекс решит, кто прав.
+        raise ApiError(status.HTTP_409_CONFLICT, EMAIL_TAKEN, "Email уже занят") from duplicate
     await users.touch_last_login(session, created.id)
     await session.refresh(created)
     set_session_cookie(response, created.id)
@@ -79,11 +86,14 @@ async def login(
 ) -> UserOut:
     """Неверный email и неверный пароль дают одну ошибку: существование email не утекает."""
     found = await users.get_by_email_lower(session, payload.email)
-    if found is None or not verify_password(payload.password, found.password_hash):
+    if found is None:
+        # Пароль проверяется и здесь — по хешу-заглушке. Иначе несуществующий email
+        # отвечал бы заметно быстрее существующего с неверным паролем.
+        verify_password(payload.password, PASSWORD_DUMMY_HASH)
         raise ApiError(
             status.HTTP_401_UNAUTHORIZED, INVALID_CREDENTIALS, "Неверный email или пароль"
         )
-    if not found.is_active:
+    if not verify_password(payload.password, found.password_hash) or not found.is_active:
         raise ApiError(
             status.HTTP_401_UNAUTHORIZED, INVALID_CREDENTIALS, "Неверный email или пароль"
         )

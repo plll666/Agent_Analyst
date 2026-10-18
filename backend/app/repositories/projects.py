@@ -43,7 +43,7 @@ async def list_for_owner(session: AsyncSession, owner_id: uuid.UUID) -> list[Pro
 async def get_for_owner(
     session: AsyncSession, project_id: uuid.UUID, owner_id: uuid.UUID
 ) -> Project | None:
-    """Проект по id и владельцу. ``None`` означает и «нет», и «чужой» — наружу это 404."""
+    """Проект по id и владельцу; ``None`` означает и «нет», и «чужой»."""
     statement = select(Project).where(Project.id == project_id, Project.owner_id == owner_id)
     return await session.scalar(statement)
 
@@ -87,8 +87,7 @@ async def add_requirement_version(
     """Добавить версию требования и сделать её текущей.
 
     Строка проекта блокируется: уникального индекса на ``(project_id, version)`` нет,
-    поэтому без блокировки два параллельных вызова выдали бы одну версию. ``created_by``
-    заполняет система, владение по нему не проверяется.
+    без блокировки параллельные вызовы выдали бы одну версию.
     """
     locked = await session.scalar(select(Project).where(Project.id == project_id).with_for_update())
     if locked is None:
@@ -121,7 +120,7 @@ async def add_requirement_version(
 async def list_requirements(
     session: AsyncSession, project_id: uuid.UUID, owner_id: uuid.UUID
 ) -> list[Requirement]:
-    """Версии по убыванию номера: таймлайн рисуется без пересортировки."""
+    """Версии требований по убыванию номера."""
     statement = (
         select(Requirement)
         .join(Project, Project.id == Requirement.project_id)

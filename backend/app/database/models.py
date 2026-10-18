@@ -116,8 +116,8 @@ class Verification(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
     model_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("model_versions.id"))
-    property_id: Mapped[str | None] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(32))
+    property_id: Mapped[str | None] = mapped_column(String(32))
     engine: Mapped[str] = mapped_column(String(32))
     engine_version: Mapped[str | None] = mapped_column(String(64))
     counterexample: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -139,6 +139,7 @@ class Verification(Base):
         CheckConstraint("model_auto_edited = false", name="ck_verifications_model_auto_edited"),
         Index("ix_verifications_project_created", "project_id", text("created_at DESC")),
         Index("ix_verifications_model_version_id", "model_version_id"),
+        Index("ix_verifications_project_property", "project_id", "property_id"),
     )
 
 

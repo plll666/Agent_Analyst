@@ -1,27 +1,37 @@
-from collections.abc import AsyncIterator
+"""Сессия БД для HTTP-слоя поверх общей реализации из ``app.database.session``."""
+
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+)
 
-from app.config import get_settings
+from app.database.session import create_engine_and_sessionmaker
+from app.database.session import session_scope as db_session_scope
 
-_engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
-_sessionmaker = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+_engine: AsyncEngine | None = None
+_sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+
+def open_database() -> None:
+    """Создать движок и фабрику сессий."""
+    global _engine, _sessionmaker
+    _engine, _sessionmaker = create_engine_and_sessionmaker()
 
 
 @asynccontextmanager
-async def session_scope() -> AsyncIterator[AsyncSession]:
-    """Сессия с фиксацией: коммит на выходе, откат при исключении."""
-    async with _sessionmaker() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+async def session_scope() -> AsyncGenerator[AsyncSession]:
+    """Сессия с коммитом на выходе и откатом при ошибке."""
+    if _sessionmaker is None:
+        raise RuntimeError("open_database() не вызван: фабрика сессий не создана")
+    async with db_session_scope(_sessionmaker) as session:
+        yield session
 
 
-async def get_session() -> AsyncIterator[AsyncSession]:
+async def get_session() -> AsyncGenerator[AsyncSession]:
     """Зависимость FastAPI: сессия на запрос."""
     async with session_scope() as session:
         yield session
@@ -29,4 +39,5 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 async def dispose_engine() -> None:
     """Закрыть пул соединений при остановке процесса."""
-    await _engine.dispose()
+    if _engine is not None:
+        await _engine.dispose()

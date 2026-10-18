@@ -179,7 +179,7 @@ async def test_model_auto_edited_stays_false(session: AsyncSession, owner_id: uu
 
 
 async def test_database_rejects_auto_edit(session: AsyncSession, owner_id: uuid.UUID) -> None:
-    """CHECK в БД — вторая линия: даже прямой UPDATE не пройдёт."""
+    """CHECK в БД — вторая линия защиты."""
     from sqlalchemy import text
 
     project_id, model_id = await _project_with_model(session, owner_id)

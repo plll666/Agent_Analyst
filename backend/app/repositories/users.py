@@ -14,7 +14,7 @@ async def create(
     password_hash: str,
     display_name: str | None = None,
 ) -> User:
-    """Создать пользователя. Уникальность email держит индекс ``ix_users_email_lower``."""
+    """Создать пользователя; уникальность email держит индекс."""
     user = User(
         id=uuid.uuid4(),
         email=email,

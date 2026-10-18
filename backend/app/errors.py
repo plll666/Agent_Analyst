@@ -1,3 +1,5 @@
+"""Формат ошибок, общий для всего API."""
+
 import logging
 from typing import Any
 
@@ -24,11 +26,7 @@ HTTP_STATUS_CODES = {
 
 
 class ApiError(Exception):
-    """Ошибка с кодом из контракта.
-
-    Тело ответа всегда ``{"detail": {"code", "message"}}`` — фронт разбирает только
-    такой формат, включая ошибки валидации.
-    """
+    """Ошибка с кодом из контракта и телом ``{"detail": {"code", "message"}}``."""
 
     def __init__(self, status_code: int, code: str, message: str) -> None:
         super().__init__(message)
@@ -47,7 +45,7 @@ def _envelope(status_code: int, code: str, message: str) -> JSONResponse:
 
 
 def install_exception_handlers(app: FastAPI) -> None:
-    """Свести все ошибки к одному формату: иначе фронт получает два разных вида ответа."""
+    """Свести все ошибки к одному формату ответа."""
     app.add_exception_handler(
         ApiError, lambda _r, exc: JSONResponse(exc.payload(), exc.status_code)
     )
@@ -69,12 +67,7 @@ def install_exception_handlers(app: FastAPI) -> None:
     async def _on_response_validation(
         _request: Request, exc: ResponseValidationError
     ) -> JSONResponse:
-        """Ответ не сошёлся с ``response_model`` — это баг сервера, а не вина клиента.
-
-        Брать ``ResponseValidationError`` в хендлере запроса бессмысленно: он брат
-        ``RequestValidationError`` по общему ``ValidationException``, а не его подкласс.
-        Причину уходит в лог, наружу — короткое сообщение без устройства DTO.
-        """
+        """Ответ не сошёлся с ``response_model`` — это баг сервера."""
         logger.error(
             "Ответ не соответствует response_model на %s: %s",
             _request.url.path,
@@ -88,7 +81,7 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _on_unexpected(_request: Request, exc: Exception) -> JSONResponse:
-        """Конверт держится на любой ошибке: дефолт Starlette фронт не разберёт."""
+        """Конверт держится на любой ошибке."""
         logger.exception("Необработанная ошибка на %s", _request.url.path)
         return _envelope(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
