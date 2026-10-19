@@ -116,7 +116,7 @@ class Verification(Base):
     engine_version: Mapped[str | None] = mapped_column(String(64))
     counterexample: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     statistics: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    related_requirements: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    related_requirements: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     error_detail: Mapped[str | None] = mapped_column(Text)
     business_summary: Mapped[str] = mapped_column(Text)
