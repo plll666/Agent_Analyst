@@ -70,7 +70,7 @@ def _verification_out(record: VerificationRecord) -> dict[str, Any]:
         {
             "id": str(record.id),
             "project_id": str(record.project_id),
-            "model_version_id": str(record.model_version_id),
+            "model_version_id": (str(record.model_version_id) if record.model_version_id else None),
             "created_at": record.created_at.isoformat(),
         }
     )

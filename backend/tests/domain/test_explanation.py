@@ -15,6 +15,7 @@ TERMINAL_WITHOUT_VIOLATION = [
     VerificationStatus.STATE_LIMIT_REACHED,
     VerificationStatus.MODEL_INVALID,
     VerificationStatus.ENGINE_ERROR,
+    VerificationStatus.AGENT_ERROR,
 ]
 
 
@@ -77,3 +78,12 @@ def test_pending_allows_empty_summary() -> None:
         explanation_errors(VerificationStatus.PENDING, VerificationExplanation(business_summary=""))
         == []
     )
+
+
+def test_agent_error_explains_that_the_model_was_not_built() -> None:
+    """Ошибка агента — не результат проверки, но объяснить её пользователю надо."""
+    explanation = VerificationExplanation(
+        business_summary="Агент не смог построить модель по этому требованию."
+    )
+
+    assert explanation_errors(VerificationStatus.AGENT_ERROR, explanation) == []

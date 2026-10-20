@@ -10,11 +10,12 @@ const INCONCLUSIVE_STATUSES = [
   VERIFICATION_STATUSES.stateLimitReached,
   VERIFICATION_STATUSES.modelInvalid,
   VERIFICATION_STATUSES.engineError,
+  VERIFICATION_STATUSES.agentError,
 ]
 
 describe('VERIFICATION_STATUS_META', () => {
-  it('описывает все семь статусов контракта', () => {
-    expect(ALL_STATUSES).toHaveLength(7)
+  it('описывает все восемь статусов контракта', () => {
+    expect(ALL_STATUSES).toHaveLength(8)
     expect(Object.keys(VERIFICATION_STATUS_META).sort()).toEqual([...ALL_STATUSES].sort())
   })
 
@@ -39,7 +40,9 @@ describe('VERIFICATION_STATUS_META', () => {
   it.each(INCONCLUSIVE_STATUSES)('говорит в %s, что вывод делать нельзя', (status) => {
     const meta = VERIFICATION_STATUS_META[status]
 
-    expect(meta.explanation).toMatch(/не установлены|не дала результата|не прошла валидацию/)
+    expect(meta.explanation).toMatch(
+      /не установлены|не дала результата|не прошла валидацию|не начиналась/,
+    )
   })
 
   it('помечает только PROPERTY_HOLDS успехом', () => {

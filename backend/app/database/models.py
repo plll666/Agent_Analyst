@@ -111,7 +111,7 @@ class Verification(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
-    model_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("model_versions.id"))
+    model_version_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("model_versions.id"))
     status: Mapped[str] = mapped_column(String(32))
     property_id: Mapped[str | None] = mapped_column(String(32))
     engine: Mapped[str] = mapped_column(String(32))

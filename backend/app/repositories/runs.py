@@ -142,10 +142,14 @@ async def create_pending_verification(
     session: AsyncSession,
     *,
     project_id: uuid.UUID,
-    model_version_id: uuid.UUID,
+    model_version_id: uuid.UUID | None,
     engine: str,
 ) -> Verification:
-    """Завести прогон в статусе ``PENDING``; ``business_summary`` пока пуст."""
+    """Завести прогон в статусе ``PENDING``; ``business_summary`` пока пуст.
+
+    ``model_version_id`` может быть пустым: в агентном цикле прогон заводится до
+    того, как модель построена, — её строит агент внутри задачи.
+    """
     record = Verification(
         id=uuid.uuid4(),
         project_id=project_id,

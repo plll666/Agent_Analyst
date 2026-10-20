@@ -107,6 +107,7 @@ export const VERIFICATION_STATUSES = {
   timeout: 'TIMEOUT',
   stateLimitReached: 'STATE_LIMIT_REACHED',
   engineError: 'ENGINE_ERROR',
+  agentError: 'AGENT_ERROR',
 } as const
 
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[keyof typeof VERIFICATION_STATUSES]
@@ -118,6 +119,7 @@ export const TERMINAL_VERIFICATION_STATUSES: VerificationStatus[] = [
   VERIFICATION_STATUSES.timeout,
   VERIFICATION_STATUSES.stateLimitReached,
   VERIFICATION_STATUSES.engineError,
+  VERIFICATION_STATUSES.agentError,
 ]
 
 export type Literal = string | number | boolean | null

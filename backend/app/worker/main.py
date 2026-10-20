@@ -22,6 +22,7 @@ from app.agent.explainer import explain_result
 from app.agent.llm import LLMClient, LLMError, LLMSettings, client_from_env
 from app.database.session import create_engine_and_sessionmaker
 from app.domain.behavioral_model import BehavioralModel
+from app.domain.explanation import summary_for
 from app.domain.verdict import combine
 from app.domain.verification import (
     VerificationExplanation,
@@ -155,7 +156,7 @@ async def _explain(
     Returns:
         Результат, дополненный ссылками на требования, и объяснение.
     """
-    fallback = VerificationExplanation(business_summary=summary_for(result))
+    fallback = VerificationExplanation(business_summary=summary_for(result.status))
     client: LLMClient | None = ctx.get(_LLM_KEY)
     if result.status is not VerificationStatus.PROPERTY_VIOLATED or client is None:
         return result, fallback
@@ -180,42 +181,6 @@ async def _explain(
         return result, fallback
     enriched = result.model_copy(update={"related_requirements": answered.related_requirements})
     return enriched, answered.explanation
-
-
-def summary_for(result: VerificationResult) -> str:
-    """Шаблонное объяснение статуса на языке пользователя.
-
-    Используется, когда объяснять нечего (нет нарушения) или когда агент не смог
-    ответить. Пустая строка рядом с терминальным статусом читалась бы как «всё
-    хорошо», поэтому текст есть у каждого статуса.
-
-    Args:
-        result: Результат проверки.
-
-    Returns:
-        Текст объяснения.
-    """
-    return _SUMMARIES[result.status]
-
-
-_SUMMARIES: dict[VerificationStatus, str] = {
-    VerificationStatus.PROPERTY_HOLDS: (
-        "В исследованной модели нарушений не нашлось. Это не доказательство "
-        "корректности системы: проверена только построенная модель."
-    ),
-    VerificationStatus.PROPERTY_VIOLATED: (
-        "Найден контрпример — последовательность, нарушающая проверяемое свойство."
-    ),
-    VerificationStatus.MODEL_INVALID: (
-        "Модель не прошла валидацию или не компилируется в TLA+, перебор не начался."
-    ),
-    VerificationStatus.TIMEOUT: "Движок не уложился в лимит времени, проверка не завершена.",
-    VerificationStatus.STATE_LIMIT_REACHED: (
-        "Исчерпан лимит состояний, перебор остановлен до конца."
-    ),
-    VerificationStatus.ENGINE_ERROR: "Движок завершился с ошибкой, результата проверки нет.",
-    VerificationStatus.PENDING: "Проверка ещё выполняется.",
-}
 
 
 async def startup(ctx: dict[str, Any]) -> None:

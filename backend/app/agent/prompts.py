@@ -6,7 +6,9 @@
 гипотезы готовой правкой модели.
 """
 
-MODELING_PROMPT_VERSION = "modeling-2026-10-20.1"
+from collections.abc import Sequence
+
+MODELING_PROMPT_VERSION = "modeling-2026-10-20.2"
 EXPLANATION_PROMPT_VERSION = "explanation-2026-10-20.1"
 
 MODELING_SYSTEM = """Ты — аналитик требований. По тексту описания модуля ты строишь
@@ -52,8 +54,10 @@ markdown и пояснений вокруг.
 7. Свойства: invariant, forbidden_state, reachable, deadlock_free. У deadlock_free
    нет expression. Сформулируй 1–4 свойства, которые прямо следуют из текста;
    id — P1, P2, ...
-8. source_reference — дословная цитата из текста или её начало. Если подходящей
-   цитаты нет, не заполняй поле.
+8. source_reference — дословная цитата из текста требования или её начало. У перехода
+   и у свойства поле обязательно: без него не видно, из какого места текста взято
+   правило. У переменной поле необязательно: если подходящей цитаты нет, оставь его
+   пустым.
 9. Верни только документ модели, без обёрток вида {"model": ...}.
 """
 
@@ -88,9 +92,25 @@ EXPLANATION_SYSTEM = """Ты объясняешь контрпример мод�
 """
 
 
-def modeling_user(requirement_text: str) -> str:
-    """Сообщение с текстом требования для построения модели."""
-    return f"Текст требования:\n\n{requirement_text}"
+def modeling_user(requirement_text: str, feedback: Sequence[str] = ()) -> str:
+    """Сообщение с текстом требования и, если есть, замечаниями ворот.
+
+    Args:
+        requirement_text: Исходный текст требования.
+        feedback: Замечания к прошлой модели: цитаты не из текста, свойство,
+            которое ни от чего не зависит.
+
+    Returns:
+        Сообщение модели.
+    """
+    message = f"Текст требования:\n\n{requirement_text}"
+    if not feedback:
+        return message
+    problems = "\n".join(f"- {problem}" for problem in feedback)
+    return (
+        f"{message}\n\nМодель не прошла проверку готовности. Исправь ровно эти "
+        f"замечания и верни новый документ:\n{problems}"
+    )
 
 
 def explanation_user(requirement_text: str, model_json: str, trace_json: str) -> str:

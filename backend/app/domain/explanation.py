@@ -51,3 +51,42 @@ def explanation_errors(
     if explanation.root_cause is None:
         errors.append("при нарушении свойства обязателен класс причины")
     return errors
+
+
+SUMMARIES: dict[VerificationStatus, str] = {
+    VerificationStatus.PROPERTY_HOLDS: (
+        "В исследованной модели нарушений не нашлось. Это не доказательство "
+        "корректности системы: проверена только построенная модель."
+    ),
+    VerificationStatus.PROPERTY_VIOLATED: (
+        "Найден контрпример — последовательность, нарушающая проверяемое свойство."
+    ),
+    VerificationStatus.MODEL_INVALID: (
+        "Модель не прошла валидацию или не компилируется в TLA+, перебор не начался."
+    ),
+    VerificationStatus.TIMEOUT: "Движок не уложился в лимит времени, проверка не завершена.",
+    VerificationStatus.STATE_LIMIT_REACHED: (
+        "Исчерпан лимит состояний, перебор остановлен до конца."
+    ),
+    VerificationStatus.ENGINE_ERROR: "Движок завершился с ошибкой, результата проверки нет.",
+    VerificationStatus.AGENT_ERROR: (
+        "Агент не смог построить модель по этому требованию, поэтому проверка не начиналась."
+    ),
+    VerificationStatus.PENDING: "Проверка ещё выполняется.",
+}
+
+
+def summary_for(status: VerificationStatus) -> str:
+    """Шаблонное объяснение статуса на языке пользователя.
+
+    Используется, когда объяснять нечего (нет нарушения) или когда агент не смог
+    ответить. Пустая строка рядом с терминальным статусом читалась бы как «всё
+    хорошо», поэтому текст есть у каждого статуса.
+
+    Args:
+        status: Статус прогона.
+
+    Returns:
+        Текст объяснения.
+    """
+    return SUMMARIES[status]

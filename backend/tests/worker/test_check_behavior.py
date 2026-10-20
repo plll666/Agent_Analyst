@@ -20,8 +20,9 @@ import pytest
 from app.agent.llm import LLMError
 from app.database.models import ModelVersion, Requirement
 from app.database.session import session_scope
+from app.domain.explanation import summary_for
 from app.domain.verification import VerificationResult, VerificationStatus
-from app.worker.main import _LLM_KEY, CheckBehaviorError, check_behavior, summary_for
+from app.worker.main import _LLM_KEY, CheckBehaviorError, check_behavior
 from app.worker.model_checker import EngineSettings, ModelChecker
 from tests.agent.support import FakeLLM, explanation_payload
 from tests.worker.support import (
@@ -161,6 +162,7 @@ async def test_unknown_verification_raises_instead_of_passing_silently(
         VerificationStatus.STATE_LIMIT_REACHED,
         VerificationStatus.MODEL_INVALID,
         VerificationStatus.ENGINE_ERROR,
+        VerificationStatus.AGENT_ERROR,
     ],
 )
 def test_every_non_success_status_has_a_plain_language_summary(
@@ -169,7 +171,7 @@ def test_every_non_success_status_has_a_plain_language_summary(
     """Каждый неуспех обязан объясняться словами, а не пустой строкой."""
     result = VerificationResult(status=status, property_id="P1", engine="TLC")
 
-    summary = summary_for(result)
+    summary = summary_for(result.status)
 
     assert summary.strip()
     assert "не доказательство" not in summary
@@ -177,7 +179,7 @@ def test_every_non_success_status_has_a_plain_language_summary(
 
 def test_pending_is_not_described_as_a_finished_result() -> None:
     """``PENDING`` — это ещё идущая задача, а не вердикт."""
-    summary = summary_for(VerificationResult(status=VerificationStatus.PENDING, engine="TLC"))
+    summary = summary_for(VerificationStatus.PENDING)
 
     assert "выполняется" in summary
 

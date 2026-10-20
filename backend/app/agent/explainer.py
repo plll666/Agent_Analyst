@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from app.agent.citations import is_quote
 from app.agent.llm import LLMClient, request_validated
 from app.agent.prompts import EXPLANATION_PROMPT_VERSION, EXPLANATION_SYSTEM, explanation_user
 from app.domain.behavioral_model import BehavioralModel
@@ -142,7 +143,6 @@ def _related(payload: Mapping[str, Any], requirement_text: str) -> tuple[Related
     raw = payload.get("related_requirements", [])
     if not isinstance(raw, list):
         raise ValueError("related_requirements должен быть списком")
-    normalized_text = _normalize(requirement_text)
     related: list[RelatedRequirement] = []
     for index, item in enumerate(raw):
         if not isinstance(item, Mapping):
@@ -152,7 +152,7 @@ def _related(payload: Mapping[str, Any], requirement_text: str) -> tuple[Related
             continue
         if not isinstance(quote, str) or not quote.strip():
             raise ValueError(f"related_requirements[{index}].quote пуст")
-        if _normalize(quote) not in normalized_text:
+        if not is_quote(requirement_text, quote):
             raise ValueError(
                 f"цитата {quote!r} не встречается в тексте требования: "
                 "приводи только дословные фрагменты"
@@ -162,8 +162,3 @@ def _related(payload: Mapping[str, Any], requirement_text: str) -> tuple[Related
             raise ValueError(f"related_requirements[{index}].paragraph_ref должен быть строкой")
         related.append(RelatedRequirement(paragraph_ref=paragraph_ref, quote=quote.strip()))
     return tuple(related)
-
-
-def _normalize(text: str) -> str:
-    """Свести пробелы, чтобы цитата не ломалась на переносах строк."""
-    return " ".join(text.split())

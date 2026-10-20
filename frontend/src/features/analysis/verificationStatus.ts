@@ -68,6 +68,14 @@ export const VERIFICATION_STATUS_META: Record<VerificationStatus, VerificationSt
     tone: 'danger',
     isPending: false,
   },
+  [VERIFICATION_STATUSES.agentError]: {
+    headline: 'Агент не построил модель',
+    explanation:
+      'Агент не смог превратить требование в проверяемую модель, поэтому проверка не начиналась и вывод делать нельзя. Текст требования стоит переформулировать или дополнить.',
+    shortLabel: 'Агент',
+    tone: 'danger',
+    isPending: false,
+  },
 }
 
 export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {

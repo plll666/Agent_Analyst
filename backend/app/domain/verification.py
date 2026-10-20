@@ -23,6 +23,10 @@ class VerificationStatus(StrEnum):
 
     ``PROPERTY_HOLDS`` означает лишь, что в исследованной конечной модели нарушений нет,
     и агент обязан оговорить это пользователю.
+
+    ``AGENT_ERROR`` — приложение, а не движок: агент не смог построить модель, поэтому
+    перебора не было вовсе. Отдельный статус нужен, чтобы «агент не справился» не
+    выглядело как «проверка прошла» и не смешивалось с ``ENGINE_ERROR``.
     """
 
     PENDING = "PENDING"
@@ -32,6 +36,7 @@ class VerificationStatus(StrEnum):
     TIMEOUT = "TIMEOUT"
     STATE_LIMIT_REACHED = "STATE_LIMIT_REACHED"
     ENGINE_ERROR = "ENGINE_ERROR"
+    AGENT_ERROR = "AGENT_ERROR"
 
 
 class RootCause(StrEnum):

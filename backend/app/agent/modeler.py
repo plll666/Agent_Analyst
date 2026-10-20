@@ -6,7 +6,7 @@
 с перечнем нарушений.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from app.agent.llm import LLMClient, request_validated
@@ -15,7 +15,11 @@ from app.domain.behavioral_model import BehavioralModel
 
 
 async def build_model(
-    client: LLMClient, *, requirement_text: str, attempts: int
+    client: LLMClient,
+    *,
+    requirement_text: str,
+    attempts: int,
+    feedback: Sequence[str] = (),
 ) -> BehavioralModel:
     """Превратить текст требования в проверяемую модель.
 
@@ -23,6 +27,7 @@ async def build_model(
         client: Клиент LLM.
         requirement_text: Исходное описание модуля.
         attempts: Сколько попыток дать модели на исправление документа.
+        feedback: Замечания к прошлой модели, если модель строится заново.
 
     Returns:
         Валидная модель; её домены конечны и все ссылки разрешены.
@@ -34,7 +39,7 @@ async def build_model(
     return await request_validated(
         client,
         system=MODELING_SYSTEM,
-        user=modeling_user(requirement_text),
+        user=modeling_user(requirement_text, feedback),
         prompt_version=MODELING_PROMPT_VERSION,
         attempts=attempts,
         parse=_parse_model,
