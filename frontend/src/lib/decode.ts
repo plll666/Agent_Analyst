@@ -3,6 +3,7 @@ import {
   MODEL_VALIDATION_STATUSES,
   MODEL_SOURCES,
   PROPERTY_TYPES,
+  ROOT_CAUSES,
   VARIABLE_TYPES,
   VERIFICATION_STATUSES,
 } from '../types/api'
@@ -21,6 +22,7 @@ import type {
   Project,
   RelatedRequirement,
   Requirement,
+  RootCause,
   User,
   Verification,
   VerificationCounterexample,
@@ -322,6 +324,7 @@ export const decodeModelVersion: Decoder<ModelVersion> = (value) => {
     id: readString(source, 'id'),
     project_id: readString(source, 'project_id'),
     version: readNumber(source, 'version'),
+    requirement_id: readNullableString(source, 'requirement_id'),
     source: source_ as ModelVersion['source'],
     schema_hash: readString(source, 'schema_hash'),
     validation_status: validationStatus as ModelVersion['validation_status'],
@@ -384,6 +387,15 @@ export const decodeVerification: Decoder<Verification> = (value) => {
   const counterexample = source['counterexample']
   const relatedRequirements = source['related_requirements']
   const duration = source['duration_ms']
+  const rootCause = source['root_cause']
+
+  if (
+    rootCause !== null &&
+    rootCause !== undefined &&
+    !Object.values(ROOT_CAUSES).includes(rootCause as RootCause)
+  ) {
+    throw new DecodeError(`Неизвестный класс причины «${String(rootCause)}»`)
+  }
 
   return {
     id: readString(source, 'id'),
@@ -411,6 +423,7 @@ export const decodeVerification: Decoder<Verification> = (value) => {
       typeof source['business_summary'] === 'string' ? source['business_summary'] : '',
     hypothesis: readNullableString(source, 'hypothesis'),
     question: readNullableString(source, 'question'),
+    root_cause: rootCause === null || rootCause === undefined ? null : (rootCause as RootCause),
     created_at: readString(source, 'created_at'),
   }
 }

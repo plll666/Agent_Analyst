@@ -17,9 +17,13 @@ from typing import Any
 
 import pytest
 
+from app.agent.llm import LLMError
+from app.database.models import ModelVersion, Requirement
+from app.database.session import session_scope
 from app.domain.verification import VerificationResult, VerificationStatus
-from app.worker.main import CheckBehaviorError, check_behavior, summary_for
+from app.worker.main import _LLM_KEY, CheckBehaviorError, check_behavior, summary_for
 from app.worker.model_checker import EngineSettings, ModelChecker
+from tests.agent.support import FakeLLM, explanation_payload
 from tests.worker.support import (
     SeededRun,
     acceptance_model,
@@ -176,3 +180,100 @@ def test_pending_is_not_described_as_a_finished_result() -> None:
     summary = summary_for(VerificationResult(status=VerificationStatus.PENDING, engine="TLC"))
 
     assert "выполняется" in summary
+
+
+REQUIREMENT_TEXT = (
+    "Заявка после согласования может быть исполнена. "
+    "Пользователь может отменить заявку до исполнения."
+)
+
+
+class _BrokenLLM:
+    """Провайдер, который недоступен: результат всё равно должен сохраниться."""
+
+    async def complete_json(self, *, system: str, user: str, prompt_version: str) -> dict[str, Any]:
+        del system, user, prompt_version
+        raise LLMError("нет сети")
+
+    async def aclose(self) -> None:
+        return None
+
+
+async def _link_requirement(sessions: Any, run: SeededRun) -> uuid.UUID:
+    """Создать требование проекта и связать с ним версию модели."""
+    requirement_id = uuid.uuid4()
+    async with session_scope(sessions) as session:
+        session.add(
+            Requirement(
+                id=requirement_id,
+                project_id=run.project_id,
+                version=1,
+                raw_text=REQUIREMENT_TEXT,
+                is_current=True,
+            )
+        )
+        await session.flush()
+        version = await session.get(ModelVersion, run.model_version_id)
+        assert version is not None
+        version.requirement_id = requirement_id
+    return requirement_id
+
+
+@requires_java
+async def test_violation_is_explained_in_requirement_language(
+    worker_ctx: dict[str, Any], seeded_run: SeededRun, sessions: Any
+) -> None:
+    """Объяснение агента пишется в ту же строку, что и контрпример движка."""
+    await seed_store_document(sessions, seeded_run.model_version_id, acceptance_model(False))
+    await _link_requirement(sessions, seeded_run)
+    worker_ctx[_LLM_KEY] = FakeLLM(explanation_payload())
+
+    status = await check_behavior(worker_ctx, str(seeded_run.verification_id))
+
+    row = await fetch_verification(sessions, seeded_run.verification_id)
+    assert row is not None
+    assert status == row.status == "PROPERTY_VIOLATED"
+    assert row.hypothesis == "В модели нет условия, запрещающего исполнение отменённой заявки."
+    assert row.question == "Должна ли отменённая заявка оставаться исполнимой?"
+    assert row.root_cause == "REQUIREMENT_ERROR"
+    assert row.business_summary.splitlines() == [f"Шаг {index}." for index in range(1, 5)]
+    assert row.related_requirements == [
+        {"quote": "Пользователь может отменить заявку до исполнения."}
+    ]
+
+
+@requires_java
+async def test_unavailable_llm_keeps_counterexample_with_honest_fallback(
+    worker_ctx: dict[str, Any], seeded_run: SeededRun, sessions: Any
+) -> None:
+    """Отказ провайдера не отменяет проверку и не выдаёт шаблон за объяснение."""
+    await seed_store_document(sessions, seeded_run.model_version_id, acceptance_model(False))
+    worker_ctx[_LLM_KEY] = _BrokenLLM()
+
+    status = await check_behavior(worker_ctx, str(seeded_run.verification_id))
+
+    row = await fetch_verification(sessions, seeded_run.verification_id)
+    assert row is not None
+    assert status == row.status == "PROPERTY_VIOLATED"
+    assert row.counterexample is not None
+    assert "Найден контрпример" in row.business_summary
+    assert row.hypothesis is None
+    assert row.question is None
+    assert row.root_cause is None
+
+
+@requires_java
+async def test_success_is_not_sent_to_llm(
+    worker_ctx: dict[str, Any], seeded_run: SeededRun, sessions: Any
+) -> None:
+    """``PROPERTY_HOLDS`` — отсутствие нарушений в модели, а не сценарий для модели."""
+    await seed_store_document(sessions, seeded_run.model_version_id, acceptance_model(True))
+    worker_ctx[_LLM_KEY] = FakeLLM()
+
+    status = await check_behavior(worker_ctx, str(seeded_run.verification_id))
+
+    row = await fetch_verification(sessions, seeded_run.verification_id)
+    assert row is not None
+    assert status == row.status == "PROPERTY_HOLDS"
+    assert "не доказательство" in row.business_summary
+    assert row.root_cause is None

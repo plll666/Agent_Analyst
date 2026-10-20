@@ -2,6 +2,7 @@ import type {
   Literal,
   PropertyType,
   RelatedRequirement,
+  RootCause,
   VariableType,
   VerificationCounterexample,
   VerificationStatistics,
@@ -41,6 +42,7 @@ export interface MockModelRecord {
   id: string
   projectId: string
   version: number
+  requirementId: string | null
   source: 'agent' | 'manual'
   schemaHash: string
   validationStatus: 'VALID' | 'INVALID'
@@ -66,6 +68,7 @@ export interface MockVerificationRecord {
   businessSummary: string
   hypothesis: string | null
   question: string | null
+  rootCause: RootCause | null
   createdAt: string
   startedAt: number | null
 }
@@ -237,6 +240,7 @@ export const buildSeedModels = (): MockModelRecord[] => [
     id: ORDERS_MODEL_V1_ID,
     projectId: MOCK_PROJECT_IDS.orders,
     version: 1,
+    requirementId: '7a1c93b4-1d20-4a6f-9b3e-5c8d0e1f2a01',
     source: 'agent',
     schemaHash: 'c0ffee4a1b7d93e2a6f5c84d0b71e3a92c4f8d1e60b7a35c9e2d4f8a1b6c30d95',
     validationStatus: 'VALID',
@@ -249,6 +253,7 @@ export const buildSeedModels = (): MockModelRecord[] => [
     id: ORDERS_MODEL_V2_ID,
     projectId: MOCK_PROJECT_IDS.orders,
     version: 2,
+    requirementId: '7a1c93b4-1d20-4a6f-9b3e-5c8d0e1f2a02',
     source: 'agent',
     schemaHash: 'b19a7d3f5c2e8a40d7b6f1e93c5a8d204e7b3f6a1c9d82e5b4a70f3c6d9e2b18',
     validationStatus: 'VALID',
@@ -261,6 +266,7 @@ export const buildSeedModels = (): MockModelRecord[] => [
     id: CONTRACTS_MODEL_ID,
     projectId: MOCK_PROJECT_IDS.contracts,
     version: 1,
+    requirementId: '7a1c93b4-1d20-4a6f-9b3e-5c8d0e1f2a03',
     source: 'agent',
     schemaHash: 'a71f4c9e2d6b80a35f1c7e94b2d0a68f5e3c1b97d4a20f6e8c5b3a1d9f7e4c26',
     validationStatus: 'VALID',
@@ -334,6 +340,7 @@ export const buildSeedVerifications = (): MockVerificationRecord[] => [
       'В модели отсутствует условие, запрещающее Execute после Cancel, либо Cancel должен сбрасывать признак approved.',
     question:
       'Отмена заявки должна снимать признак approved, или запрет исполнения должен быть отдельным условием в переходе Execute?',
+    rootCause: 'REQUIREMENT_ERROR',
     createdAt: daysAgo(20),
     startedAt: null,
   },
@@ -353,6 +360,7 @@ export const buildSeedVerifications = (): MockVerificationRecord[] => [
     businessSummary: holdsSummary,
     hypothesis: null,
     question: null,
+    rootCause: null,
     createdAt: daysAgo(1, 3),
     startedAt: null,
   },
@@ -373,6 +381,7 @@ export const buildSeedVerifications = (): MockVerificationRecord[] => [
       'Утвердить договор можно только после юридической проверки — иначе состояние недостижимо.',
     hypothesis: null,
     question: null,
+    rootCause: null,
     createdAt: daysAgo(5),
     startedAt: null,
   },
@@ -390,6 +399,7 @@ export const outcomeFor = (
   | 'businessSummary'
   | 'hypothesis'
   | 'question'
+  | 'rootCause'
 > => {
   if (status === 'PROPERTY_VIOLATED') {
     return {
@@ -408,6 +418,7 @@ export const outcomeFor = (
         'В модели отсутствует условие, запрещающее Execute после Cancel, либо Cancel должен сбрасывать признак approved.',
       question:
         'Отмена заявки должна снимать признак approved, или запрет исполнения должен быть отдельным условием в переходе Execute?',
+      rootCause: 'REQUIREMENT_ERROR',
     }
   }
 
@@ -420,6 +431,7 @@ export const outcomeFor = (
       businessSummary: holdsSummary,
       hypothesis: null,
       question: null,
+      rootCause: null,
     }
   }
 
@@ -433,6 +445,7 @@ export const outcomeFor = (
         'Перебор остановлен до полного обхода состояний. Ни нарушение, ни его отсутствие не установлены.',
       hypothesis: null,
       question: null,
+      rootCause: null,
     }
   }
 
@@ -444,5 +457,6 @@ export const outcomeFor = (
     businessSummary: `Проверка не выполнена: модель v${model.version} не прошла подготовку к прогону.`,
     hypothesis: null,
     question: null,
+    rootCause: null,
   }
 }

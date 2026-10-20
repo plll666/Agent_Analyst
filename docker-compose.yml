@@ -10,6 +10,14 @@ x-backend-env: &backend-env
   MINIO_BUCKET: ${MINIO_BUCKET:-agent-analyst-artifacts}
   MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agent_analyst}
   MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agent_analyst}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+  LLM_MAX_ATTEMPTS: ${LLM_MAX_ATTEMPTS:-3}
+  # Провайдер за корпоративным корнем (Минцифры): контейнерный bundle его не знает,
+  # поэтому подключаем trust store хоста только для процессов бэкенда и воркера.
+  SSL_CERT_FILE: /opt/host-ca.crt
 
 services:
   postgres:
@@ -89,6 +97,8 @@ services:
     restart: unless-stopped
     command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     environment: *backend-env
+    volumes:
+      - "${HOST_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}:/opt/host-ca.crt:ro"
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -113,6 +123,8 @@ services:
       target: worker
     restart: unless-stopped
     environment: *backend-env
+    volumes:
+      - "${HOST_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}:/opt/host-ca.crt:ro"
     depends_on:
       postgres:
         condition: service_healthy

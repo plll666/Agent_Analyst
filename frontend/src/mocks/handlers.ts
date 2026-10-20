@@ -11,6 +11,7 @@ import {
   findOwnedRequirement,
   findUserByEmail,
   getFallbackToken,
+  insertModelVersion,
   insertProject,
   insertRequirement,
   insertVerification,
@@ -135,6 +136,7 @@ const toModelVersionResponse = (model: MockModelRecord) => ({
   id: model.id,
   project_id: model.projectId,
   version: model.version,
+  requirement_id: model.requirementId,
   source: model.source,
   schema_hash: model.schemaHash,
   validation_status: model.validationStatus,
@@ -159,6 +161,7 @@ const toVerificationResponse = (verification: MockVerificationRecord) => ({
   business_summary: verification.businessSummary,
   hypothesis: verification.hypothesis,
   question: verification.question,
+  root_cause: verification.rootCause,
   created_at: verification.createdAt,
 })
 
@@ -416,6 +419,38 @@ export const mockHandlers = [
     }
 
     return HttpResponse.json({ items: listModelVersions(projectId).map(toModelVersionResponse) })
+  }),
+
+  http.post('/api/projects/:projectId/models', async ({ request, params }) => {
+    await delay(latency())
+
+    const user = resolveUser(request)
+
+    if (user === null) {
+      return unauthorized()
+    }
+
+    const projectId = readParam(params, 'projectId')
+
+    if (findOwnedProject(projectId, user.id) === null) {
+      return notFound()
+    }
+
+    const source = asRecord(await request.json().catch(() => null))
+    const requestedId = readString(source, 'requirement_id')
+    const requirement =
+      requestedId === null
+        ? (listRequirements(projectId).find((item) => item.isCurrent) ?? null)
+        : findOwnedRequirement(requestedId, user.id)
+
+    if (requirement === null || requirement.projectId !== projectId) {
+      return validationError('Сначала сохраните текст требования: строить модель не из чего')
+    }
+
+    return HttpResponse.json(
+      toModelVersionResponse(insertModelVersion(projectId, requirement.id)),
+      { status: 201 },
+    )
   }),
 
   http.get('/api/projects/:projectId/verifications', async ({ request, params }) => {

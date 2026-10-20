@@ -2,13 +2,14 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import Artifact, ModelVersion, Project, Verification
 from app.domain.verification import (
     Counterexample,
     RelatedRequirement,
+    RootCause,
     Statistics,
     VerificationExplanation,
     VerificationResult,
@@ -30,6 +31,7 @@ async def create_model_version(
     validation_status: str,
     validation_errors: list[str] | None = None,
     parent_version_id: uuid.UUID | None = None,
+    requirement_id: uuid.UUID | None = None,
     created_by: uuid.UUID | None = None,
 ) -> ModelVersion:
     """Сохранить интерпретацию агента как объект."""
@@ -37,6 +39,7 @@ async def create_model_version(
         id=uuid.uuid4(),
         project_id=project_id,
         parent_version_id=parent_version_id,
+        requirement_id=requirement_id,
         version=version,
         source=source,
         document=document,
@@ -49,6 +52,63 @@ async def create_model_version(
     session.add(record)
     await session.flush()
     return record
+
+
+async def create_next_model_version(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    source: str,
+    document: dict[str, Any],
+    schema_hash: str,
+    validation_status: str,
+    validation_errors: list[str] | None = None,
+    requirement_id: uuid.UUID | None = None,
+    parent_version_id: uuid.UUID | None = None,
+    created_by: uuid.UUID | None = None,
+) -> ModelVersion | None:
+    """Создать следующую версию модели, заблокировав проект.
+
+    Без блокировки два параллельных запроса прочитали бы один и тот же максимум и
+    выдали две версии с одинаковым номером: уникального индекса на
+    ``(project_id, version)`` нет.
+
+    Args:
+        session: Открытая сессия.
+        project_id: Проект, к которому относится модель.
+        source: ``agent`` или ``manual``.
+        document: Проверенный документ модели.
+        schema_hash: Хэш документа.
+        validation_status: ``VALID`` или ``INVALID``.
+        validation_errors: Список нарушений для невалидной модели.
+        requirement_id: Версия требования, по которой построена модель.
+        parent_version_id: Предыдущая версия при уточнении.
+        created_by: Автор версии.
+
+    Returns:
+        Созданная версия либо ``None``, если проекта нет.
+    """
+    locked = await session.scalar(
+        select(Project.id).where(Project.id == project_id).with_for_update()
+    )
+    if locked is None:
+        return None
+    current = await session.scalar(
+        select(func.max(ModelVersion.version)).where(ModelVersion.project_id == project_id)
+    )
+    return await create_model_version(
+        session,
+        project_id,
+        version=(current or 0) + 1,
+        source=source,
+        document=document,
+        schema_hash=schema_hash,
+        validation_status=validation_status,
+        validation_errors=validation_errors,
+        requirement_id=requirement_id,
+        parent_version_id=parent_version_id,
+        created_by=created_by,
+    )
 
 
 async def latest_model_version(
@@ -148,6 +208,7 @@ async def save_result(
     error_detail: str | None = None,
     hypothesis: str | None = None,
     question: str | None = None,
+    root_cause: str | None = None,
 ) -> Verification | None:
     """Записать результат проверки в строку прогона."""
     record = await get_verification(session, verification_id)
@@ -166,6 +227,7 @@ async def save_result(
     record.business_summary = business_summary
     record.hypothesis = hypothesis
     record.question = question
+    record.root_cause = root_cause
 
     await session.flush()
     return record
@@ -222,5 +284,6 @@ def verification_to_domain(record: Verification) -> DomainVerification:
         business_summary=record.business_summary,
         hypothesis=record.hypothesis,
         question=record.question,
+        root_cause=RootCause(record.root_cause) if record.root_cause else None,
     )
     return DomainVerification(result=result, explanation=explanation)

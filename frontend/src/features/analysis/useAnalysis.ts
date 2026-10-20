@@ -1,9 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { useToast } from '../../lib/toastContext'
+import { toUserMessage } from '../../lib/errors'
 import { queryKeys } from '../../lib/queryKeys'
 import type { Verification } from '../../types/api'
-import { fetchModelVersions, fetchVerifications, startVerification } from './analysisApi'
+import {
+  buildModel,
+  fetchModelVersions,
+  fetchVerifications,
+  startVerification,
+} from './analysisApi'
 
 export const POLL_INTERVAL_MS = 2000
 
@@ -45,6 +51,30 @@ export function useStartVerification(projectId: string) {
         description: 'Статус обновится сам — страницу перезагружать не нужно',
       })
       return verification
+    },
+  })
+}
+
+export function useBuildModel(projectId: string) {
+  const queryClient = useQueryClient()
+  const { push } = useToast()
+
+  return useMutation({
+    mutationFn: (requirementId: string) => buildModel(projectId, requirementId),
+    onSuccess: (model) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.models(projectId) })
+      push({
+        tone: 'success',
+        title: `Модель v${model.version} построена`,
+        description: 'Теперь требование можно проверить',
+      })
+    },
+    onError: (error) => {
+      push({
+        tone: 'danger',
+        title: 'Модель не построена',
+        description: toUserMessage(error),
+      })
     },
   })
 }

@@ -13,3 +13,12 @@ export const fetchVerifications = (projectId: string): Promise<Verification[]> =
 
 export const startVerification = (projectId: string): Promise<Verification> =>
   apiRequest(verificationsPath(projectId), decodeVerification, { method: HTTP_METHODS.post })
+
+export const buildModel = (
+  projectId: string,
+  requirementId: string | null = null,
+): Promise<ModelVersion> =>
+  apiRequest(modelsPath(projectId), decodeModelVersion, {
+    method: HTTP_METHODS.post,
+    body: requirementId === null ? {} : { requirement_id: requirementId },
+  })

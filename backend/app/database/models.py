@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from app.domain.verification import VerificationStatus
+from app.domain.verification import ROOT_CAUSES, VerificationStatus
 
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
@@ -89,11 +89,12 @@ class ModelVersion(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
     parent_version_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("model_versions.id"))
     version: Mapped[int] = mapped_column(Integer)
+    requirement_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("requirements.id"))
     source: Mapped[str] = mapped_column(String(20))
     document: Mapped[dict[str, Any]] = mapped_column(JSONB)
     schema_hash: Mapped[str] = mapped_column(CHAR(64))
     validation_status: Mapped[str] = mapped_column(String(20))
-    validation_errors: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    validation_errors: Mapped[list[str] | None] = mapped_column(JSONB)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -101,6 +102,7 @@ class ModelVersion(Base):
         CheckConstraint("source IN ('agent', 'manual')", name="ck_model_versions_source"),
         Index("ix_model_versions_project_version", "project_id", text("version DESC")),
         Index("ix_model_versions_parent_version_id", "parent_version_id"),
+        Index("ix_model_versions_requirement_id", "requirement_id"),
     )
 
 
@@ -122,6 +124,7 @@ class Verification(Base):
     business_summary: Mapped[str] = mapped_column(Text)
     hypothesis: Mapped[str | None] = mapped_column(Text)
     question: Mapped[str | None] = mapped_column(Text)
+    root_cause: Mapped[str | None] = mapped_column(String(32))
     model_auto_edited: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -131,6 +134,12 @@ class Verification(Base):
             name="ck_verifications_status",
         ),
         CheckConstraint("model_auto_edited = false", name="ck_verifications_model_auto_edited"),
+        CheckConstraint(
+            "root_cause IS NULL OR root_cause IN ("
+            + ", ".join(f"'{cause}'" for cause in ROOT_CAUSES)
+            + ")",
+            name="ck_verifications_root_cause",
+        ),
         Index("ix_verifications_project_created", "project_id", text("created_at DESC")),
         Index("ix_verifications_model_version_id", "model_version_id"),
         Index("ix_verifications_project_property", "project_id", "property_id"),

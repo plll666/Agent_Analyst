@@ -64,7 +64,7 @@ export { MOCK_RUN_DURATION_MS }
 export type { MockModelRecord, MockVerificationRecord }
 
 const STORAGE_KEY = 'agent-analyst-mock-db'
-const MOCK_SCHEMA_VERSION = 2
+const MOCK_SCHEMA_VERSION = 3
 
 const ANALYST_ID = '0d7c1f6a-6d3f-4f0b-9a11-3b1a5c2d7e01'
 const GUEST_ID = '0d7c1f6a-6d3f-4f0b-9a11-3b1a5c2d7e02'
@@ -395,6 +395,35 @@ export const listModelVersions = (projectId: string): MockModelRecord[] =>
 export const currentModelVersion = (projectId: string): MockModelRecord | null =>
   listModelVersions(projectId).at(0) ?? null
 
+export const insertModelVersion = (projectId: string, requirementId: string): MockModelRecord => {
+  const versions = listModelVersions(projectId)
+  const current = versions.at(0) ?? null
+  const template = current ?? buildSeedModels().at(0) ?? null
+
+  if (template === null) {
+    throw new Error('В моках нет ни одной модели, из которой можно построить версию')
+  }
+
+  const model: MockModelRecord = {
+    id: crypto.randomUUID(),
+    projectId,
+    version: (current?.version ?? 0) + 1,
+    requirementId,
+    source: 'agent',
+    schemaHash: crypto.randomUUID().replaceAll('-', '').padEnd(64, '0').slice(0, 64),
+    validationStatus: 'VALID',
+    validationErrors: [],
+    document: structuredClone(template.document),
+    outcome: template.outcome,
+    createdAt: new Date().toISOString(),
+  }
+
+  database.models.push(model)
+  persist()
+
+  return model
+}
+
 const completeDueRuns = (): void => {
   const now = Date.now()
   let changed = false
@@ -457,6 +486,7 @@ export const insertVerification = (
     businessSummary: '',
     hypothesis: null,
     question: null,
+    rootCause: null,
     createdAt: new Date().toISOString(),
     startedAt: Date.now(),
   }

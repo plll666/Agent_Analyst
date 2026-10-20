@@ -12,12 +12,14 @@ import { VerificationDetails } from '../features/analysis/VerificationDetails'
 import { VerificationHistory } from '../features/analysis/VerificationHistory'
 import { VerificationOutcome } from '../features/analysis/VerificationOutcome'
 import {
+  useBuildModel,
   useModelVersions,
   useStartVerification,
   useVerifications,
 } from '../features/analysis/useAnalysis'
 import { ProjectHeader } from '../features/projects/ProjectHeader'
 import { useProject } from '../features/projects/useProjects'
+import { useRequirements } from '../features/requirements/useRequirements'
 import { cn } from '../lib/cn'
 import { toUserMessage } from '../lib/errors'
 import { pluralizeVerifications } from '../lib/format'
@@ -49,8 +51,10 @@ export function AnalysisPage() {
   const { projectId = '' } = useParams()
   const projectQuery = useProject(projectId)
   const modelsQuery = useModelVersions(projectId)
+  const requirementsQuery = useRequirements(projectId)
   const verificationsQuery = useVerifications(projectId)
   const startMutation = useStartVerification(projectId)
+  const buildMutation = useBuildModel(projectId)
 
   const rootRef = useRef<HTMLDivElement>(null)
   const heroRef = useRef<HTMLDivElement>(null)
@@ -68,6 +72,15 @@ export function AnalysisPage() {
   const verifications = verificationsQuery.data ?? []
 
   const currentModel = models.at(0) ?? null
+  const requirements = requirementsQuery.data ?? []
+  const currentRequirement = requirements.find((requirement) => requirement.is_current) ?? null
+  const isModelStale =
+    currentRequirement !== null &&
+    currentModel !== null &&
+    currentModel.requirement_id !== currentRequirement.id
+  const needsModelBuild = currentRequirement !== null && (currentModel === null || isModelStale)
+  const canAnalyze = currentRequirement !== null
+  const isStarting = startMutation.isPending || buildMutation.isPending
   const selectedVerification =
     verifications.find((verification) => verification.id === selectedVerificationId) ??
     verifications.at(0) ??
@@ -77,9 +90,18 @@ export function AnalysisPage() {
   const viewedModel =
     models.find((model) => model.id === selectedModelId) ?? verificationModel ?? currentModel
 
-  const isLoading = projectQuery.isPending || modelsQuery.isPending || verificationsQuery.isPending
-  const failure = projectQuery.error ?? modelsQuery.error ?? verificationsQuery.error
-  const isFailing = projectQuery.isError || modelsQuery.isError || verificationsQuery.isError
+  const isLoading =
+    projectQuery.isPending ||
+    modelsQuery.isPending ||
+    requirementsQuery.isPending ||
+    verificationsQuery.isPending
+  const failure =
+    projectQuery.error ?? modelsQuery.error ?? requirementsQuery.error ?? verificationsQuery.error
+  const isFailing =
+    projectQuery.isError ||
+    modelsQuery.isError ||
+    requirementsQuery.isError ||
+    verificationsQuery.isError
 
   useGSAP(
     () => {
@@ -186,10 +208,24 @@ export function AnalysisPage() {
     setIsDetailsOpen(true)
   }
 
-  const handleStartVerification = () => {
-    startMutation.mutate(undefined, {
-      onSuccess: (verification: Verification) => setSelectedVerificationId(verification.id),
-    })
+  const handleStartAnalysis = () => {
+    if (currentRequirement === null) {
+      return
+    }
+
+    void (async () => {
+      if (needsModelBuild) {
+        try {
+          await buildMutation.mutateAsync(currentRequirement.id)
+        } catch {
+          return
+        }
+      }
+
+      startMutation.mutate(undefined, {
+        onSuccess: (verification: Verification) => setSelectedVerificationId(verification.id),
+      })
+    })()
   }
 
   if (isLoading) {
@@ -256,17 +292,24 @@ export function AnalysisPage() {
               <EmptyState
                 icon={<Icon name="clock" className="size-5" />}
                 title="Проверка ещё не запускалась"
-                description="Запустите проверку — она идёт в фоне, результат появится здесь сам, обновлять страницу не нужно."
+                description={
+                  canAnalyze
+                    ? 'Запустите проверку — она идёт в фоне, результат появится здесь сам, обновлять страницу не нужно.'
+                    : 'Сначала сохраните текст требования: агенту не из чего построить модель.'
+                }
                 className="h-full min-h-72"
                 action={
-                  <Button
-                    disabled={viewedModel === null}
-                    loading={startMutation.isPending}
-                    onClick={handleStartVerification}
-                    size="lg"
-                  >
-                    Запустить проверку
-                  </Button>
+                  canAnalyze ? (
+                    <Button loading={isStarting} onClick={handleStartAnalysis} size="lg">
+                      {needsModelBuild ? 'Построить модель и проверить' : 'Запустить проверку'}
+                    </Button>
+                  ) : (
+                    <Link to={`/projects/${project.id}`}>
+                      <Button size="lg" variant="secondary">
+                        Перейти к требованию
+                      </Button>
+                    </Link>
+                  )
                 }
               />
             ) : (
@@ -287,18 +330,25 @@ export function AnalysisPage() {
           >
             <h2 className="text-sm font-semibold tracking-tight">Проверить заново</h2>
             <p className="text-xs leading-relaxed text-muted">
-              {viewedModel === null
-                ? 'Сначала нужно построить модель — она появится, когда агент обработает требование'
-                : `Проверяется модель v${viewedModel.version} по сохранённому тексту требования`}
+              {currentRequirement === null
+                ? 'Сначала сохраните текст требования — модель строится из него'
+                : isModelStale
+                  ? 'Требование изменилось после построения модели: перед проверкой агент построит новую версию'
+                  : currentModel === null
+                    ? 'Модель ещё не построена: агент построит её по текущему требованию'
+                    : `Проверяется модель v${viewedModel?.version ?? currentModel.version} по сохранённому тексту требования`}
             </p>
-            <Button
-              className="w-full"
-              disabled={viewedModel === null}
-              loading={startMutation.isPending}
-              onClick={handleStartVerification}
-            >
-              Запустить проверку
-            </Button>
+            {canAnalyze ? (
+              <Button className="w-full" loading={isStarting} onClick={handleStartAnalysis}>
+                {needsModelBuild ? 'Построить модель и проверить' : 'Запустить проверку'}
+              </Button>
+            ) : (
+              <Link className="w-full" to={`/projects/${project.id}`}>
+                <Button className="w-full" variant="secondary">
+                  Перейти к требованию
+                </Button>
+              </Link>
+            )}
           </div>
 
           <div data-panel className="flex min-h-0 flex-1">

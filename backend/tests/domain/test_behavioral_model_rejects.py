@@ -5,6 +5,7 @@ import pytest
 
 from app.domain.behavioral_model import BehavioralModel
 from app.domain.verification import (
+    RootCause,
     Verification,
     VerificationExplanation,
     VerificationResult,
@@ -810,3 +811,22 @@ def _step(
     if transition is not None or number > 0:
         step["transition"] = transition if transition is not None else f"Step{number}"
     return step
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["PROPERTY_HOLDS", "TIMEOUT", "STATE_LIMIT_REACHED", "MODEL_INVALID", "ENGINE_ERROR"],
+)
+def test_rejects_root_cause_without_violation(status: str) -> None:
+    with pytest.raises(Exception, match="класс причины допустим только"):
+        Verification(
+            result=_result_for_status(status),
+            explanation=VerificationExplanation(
+                business_summary="текст", root_cause=RootCause.AGENT_ERROR
+            ),
+        )
+
+
+def test_rejects_unknown_root_cause() -> None:
+    with pytest.raises(Exception, match="root_cause"):
+        VerificationExplanation(business_summary="текст", root_cause="BAD_LUCK")

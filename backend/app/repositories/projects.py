@@ -130,6 +130,22 @@ async def list_requirements(
     return list(await session.scalars(statement))
 
 
+async def current_requirement(session: AsyncSession, project_id: uuid.UUID) -> Requirement | None:
+    """Текущая версия требования проекта.
+
+    Args:
+        session: Открытая сессия.
+        project_id: Проект.
+
+    Returns:
+        Текущая версия либо ``None``, если требований ещё нет.
+    """
+    statement = select(Requirement).where(
+        Requirement.project_id == project_id, Requirement.is_current.is_(True)
+    )
+    return await session.scalar(statement)
+
+
 async def get_requirement_for_owner(
     session: AsyncSession, requirement_id: uuid.UUID, owner_id: uuid.UUID
 ) -> Requirement | None:

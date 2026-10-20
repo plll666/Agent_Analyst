@@ -81,6 +81,7 @@ const verificationFixture = {
   business_summary: 'Заявка создана.\nЗаявка согласована.',
   hypothesis: 'В модели нет условия, запрещающего Execute после Cancel',
   question: null,
+  root_cause: 'REQUIREMENT_ERROR',
   created_at: '2026-10-16T09:12:00Z',
 }
 
@@ -192,6 +193,7 @@ describe('decodeModelVersion', () => {
     id: 'm-2',
     project_id: 'p-1',
     version: 2,
+    requirement_id: 'req-2',
     source: 'agent',
     schema_hash: 'a'.repeat(64),
     validation_status: 'VALID',
@@ -205,7 +207,14 @@ describe('decodeModelVersion', () => {
 
     expect(model.version).toBe(2)
     expect(model.validation_status).toBe('VALID')
+    expect(model.requirement_id).toBe('req-2')
     expect(model.document.variables).toHaveLength(3)
+  })
+
+  it('читает модель без связи с требованием', () => {
+    const model = decodeModelVersion({ ...modelFixture, requirement_id: null })
+
+    expect(model.requirement_id).toBeNull()
   })
 
   it('отвергает неизвестный источник модели', () => {
@@ -306,6 +315,24 @@ describe('decodeVerification', () => {
     const verification = decodeVerification(verificationFixture)
 
     expect(verification.related_requirements[0]?.paragraph_ref).toBe('p3')
+  })
+
+  it('читает класс причины контрпримера', () => {
+    const verification = decodeVerification(verificationFixture)
+
+    expect(verification.root_cause).toBe('REQUIREMENT_ERROR')
+  })
+
+  it('считает отсутствующий класс причины пустым', () => {
+    const verification = decodeVerification({ ...verificationFixture, root_cause: undefined })
+
+    expect(verification.root_cause).toBeNull()
+  })
+
+  it('отвергает неизвестный класс причины', () => {
+    expect(() => decodeVerification({ ...verificationFixture, root_cause: 'BAD_LUCK' })).toThrow(
+      DecodeError,
+    )
   })
 })
 

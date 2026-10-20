@@ -4,7 +4,7 @@ import { gsap } from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { VERIFICATION_STATUSES } from '../../types/api'
+import { ROOT_CAUSES, VERIFICATION_STATUSES } from '../../types/api'
 import type { Verification } from '../../types/api'
 import { VerificationOutcome } from './VerificationOutcome'
 
@@ -65,6 +65,7 @@ const violatedVerification: Verification = {
   business_summary: 'Заявка создана.\nЗаявка согласована.',
   hypothesis: null,
   question: null,
+  root_cause: null,
   created_at: '2026-10-16T09:12:00Z',
 }
 
@@ -271,5 +272,26 @@ describe('VerificationOutcome: пояснения агента', () => {
       screen.queryByRole('heading', { name: 'Что, скорее всего, не так' }),
     ).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Что нужно уточнить' })).not.toBeInTheDocument()
+  })
+})
+
+describe('VerificationOutcome: класс причины', () => {
+  it('показывает класс причины и что с ним делать', () => {
+    renderOutcome({
+      ...violatedVerification,
+      root_cause: ROOT_CAUSES.requirementError,
+      hypothesis: 'В модели нет запрета на исполнение отменённой заявки.',
+      question: 'Должна ли отменённая заявка оставаться исполнимой?',
+    })
+
+    expect(screen.getByRole('heading', { name: 'Класс причины' })).toBeInTheDocument()
+    expect(screen.getByText('Ошибка в требовании')).toBeInTheDocument()
+    expect(screen.getByText(/сам текст допускает такой сценарий/)).toBeInTheDocument()
+  })
+
+  it('не показывает блок, если причина не определена', () => {
+    renderOutcome(violatedVerification)
+
+    expect(screen.queryByRole('heading', { name: 'Класс причины' })).not.toBeInTheDocument()
   })
 })

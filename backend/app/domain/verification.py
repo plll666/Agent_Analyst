@@ -34,6 +34,22 @@ class VerificationStatus(StrEnum):
     ENGINE_ERROR = "ENGINE_ERROR"
 
 
+class RootCause(StrEnum):
+    """Класс причины контрпримера, который предполагает агент.
+
+    Три причины технически неразличимы по одному контрпримеру: модель могла верно
+    отразить ошибочное требование, могла исказить верное, а могла не найти правила,
+    которого в тексте нет. Поэтому это гипотеза агента, а не результат движка.
+    """
+
+    REQUIREMENT_ERROR = "REQUIREMENT_ERROR"
+    AGENT_ERROR = "AGENT_ERROR"
+    MISSING_RULE = "MISSING_RULE"
+
+
+ROOT_CAUSES = tuple(str(cause) for cause in RootCause)
+
+
 STATUSES_REQUIRING_PROPERTY_ID = frozenset(
     {
         VerificationStatus.PROPERTY_HOLDS,
@@ -147,6 +163,7 @@ class VerificationExplanation(WireModel):
     business_summary: str
     hypothesis: str | None = None
     question: str | None = None
+    root_cause: RootCause | None = None
 
 
 class Verification(BaseModel):
@@ -179,5 +196,13 @@ class Verification(BaseModel):
             raise ValueError(
                 f"business_summary обязателен при статусе {self.result.status}: "
                 "агент обязан объяснить результат на языке требований"
+            )
+        if (
+            self.explanation.root_cause is not None
+            and self.result.status is not VerificationStatus.PROPERTY_VIOLATED
+        ):
+            raise ValueError(
+                f"класс причины допустим только при PROPERTY_VIOLATED, "
+                f"а не при {self.result.status}"
             )
         return self

@@ -62,6 +62,7 @@ export const API_ERROR_CODES = {
   notFound: 'NOT_FOUND',
   validation: 'VALIDATION_ERROR',
   malformedResponse: 'MALFORMED_RESPONSE',
+  llmUnavailable: 'LLM_UNAVAILABLE',
 } as const
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES]
@@ -180,6 +181,7 @@ export interface ModelVersion {
   id: string
   project_id: string
   version: number
+  requirement_id: string | null
   source: ModelSource
   schema_hash: string
   validation_status: ModelValidationStatus
@@ -204,6 +206,14 @@ export interface VerificationStatistics {
   depth: number
 }
 
+export const ROOT_CAUSES = {
+  requirementError: 'REQUIREMENT_ERROR',
+  agentError: 'AGENT_ERROR',
+  missingRule: 'MISSING_RULE',
+} as const
+
+export type RootCause = (typeof ROOT_CAUSES)[keyof typeof ROOT_CAUSES]
+
 export interface RelatedRequirement {
   paragraph_ref: string | null
   quote: string | null
@@ -225,6 +235,7 @@ export interface Verification {
   business_summary: string
   hypothesis: string | null
   question: string | null
+  root_cause: RootCause | null
   created_at: string
 }
 

@@ -8,6 +8,7 @@ import { Icon } from '../../components/Icon'
 import { CounterexampleSteps } from './CounterexampleSteps'
 import { EventChain } from './EventChain'
 import { VerificationStatusBadge } from './VerificationStatusBadge'
+import { ROOT_CAUSE_META } from './rootCause'
 import {
   HOLDS_EXPLANATION,
   INCONCLUSIVE_EXPLANATION,
@@ -126,6 +127,25 @@ export function VerificationOutcome({
               <CounterexampleSteps counterexample={verification.counterexample} />
             </div>
           ) : null}
+        </section>
+      )}
+
+      {verification.root_cause === null ? null : (
+        <section className="rounded-field border border-line bg-raised/30 px-4 py-3.5">
+          <h3 className="eyebrow">Класс причины</h3>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+            <span
+              className={cn(
+                'w-fit shrink-0 rounded-field border px-2.5 py-1 text-xs font-medium',
+                ROOT_CAUSE_META[verification.root_cause].className,
+              )}
+            >
+              {ROOT_CAUSE_META[verification.root_cause].label}
+            </span>
+            <p className="text-sm leading-relaxed text-fg">
+              {ROOT_CAUSE_META[verification.root_cause].description}
+            </p>
+          </div>
         </section>
       )}
 
