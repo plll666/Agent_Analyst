@@ -6,6 +6,7 @@ export const queryKeys = {
   requirements: (projectId: string) => ['projects', projectId, 'requirements'] as const,
   models: (projectId: string) => ['projects', projectId, 'models'] as const,
   verifications: (projectId: string) => ['projects', projectId, 'verifications'] as const,
+  llmCapabilities: ['llm-capabilities'] as const,
 }
 
 export const sessionKey = queryKeys.session

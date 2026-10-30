@@ -1,21 +1,23 @@
 import { Badge } from '../../components/Badge'
 import { cn } from '../../lib/cn'
 import { VERIFICATION_STATUSES } from '../../types/api'
-import type { VerificationStatus } from '../../types/api'
-import { VERIFICATION_STATUS_META } from './verificationStatus'
+import type { RootCause, VerificationStatus } from '../../types/api'
+import { verificationMeta } from './verificationStatus'
 
 export interface VerificationStatusBadgeProps {
   status: VerificationStatus
+  rootCause?: RootCause | null
   detailed?: boolean
   className?: string
 }
 
 export function VerificationStatusBadge({
   status,
+  rootCause = null,
   detailed = false,
   className,
 }: VerificationStatusBadgeProps) {
-  const meta = VERIFICATION_STATUS_META[status]
+  const meta = verificationMeta({ status, root_cause: rootCause })
 
   const dotClassName = cn('size-1.5 rounded-full', {
     'animate-pulse bg-bone': meta.isPending,

@@ -30,6 +30,7 @@ const violatedVerification: Verification = {
   id: 'run-1',
   project_id: 'project-1',
   model_version_id: 'model-1',
+  requirement_id: 'requirement-1',
   property_id: 'P2',
   status: VERIFICATION_STATUSES.propertyViolated,
   engine: 'TLC',
@@ -293,5 +294,71 @@ describe('VerificationOutcome: класс причины', () => {
     renderOutcome(violatedVerification)
 
     expect(screen.queryByRole('heading', { name: 'Класс причины' })).not.toBeInTheDocument()
+  })
+})
+
+describe('VerificationOutcome: ответ на вопрос агента', () => {
+  const askedVerification = {
+    ...violatedVerification,
+    question: 'Должна ли отменённая заявка оставаться исполнимой?',
+  }
+
+  const renderWithAnswer = (
+    onAnswer: (answer: string) => Promise<void>,
+  ): ReturnType<typeof render> =>
+    render(
+      <VerificationOutcome
+        verification={askedVerification}
+        isDetailsOpen={false}
+        onToggleDetails={vi.fn()}
+        onAnswer={onAnswer}
+      />,
+    )
+
+  it('не отправляет пустой ответ: кнопка недоступна', () => {
+    renderWithAnswer(vi.fn().mockResolvedValue(undefined))
+
+    expect(screen.getByRole('button', { name: 'Отправить уточнение' })).toBeDisabled()
+  })
+
+  it('отправляет ответ без лишних пробелов', async () => {
+    const user = userEvent.setup()
+    const onAnswer = vi.fn().mockResolvedValue(undefined)
+    renderWithAnswer(onAnswer)
+
+    await user.type(screen.getByLabelText('Ваш ответ'), '  отменённая заявка не исполняется  ')
+    await user.click(screen.getByRole('button', { name: 'Отправить уточнение' }))
+
+    expect(onAnswer).toHaveBeenCalledWith('отменённая заявка не исполняется')
+  })
+
+  it('не показывает форму, если агент не задал вопрос', () => {
+    renderOutcome(violatedVerification)
+
+    expect(screen.queryByLabelText('Ваш ответ')).not.toBeInTheDocument()
+  })
+})
+
+describe('VerificationOutcome: ошибка модели', () => {
+  it('не выдаёт контрпример за нарушение требования и не просит ответа', () => {
+    render(
+      <VerificationOutcome
+        verification={makeVerification({
+          status: VERIFICATION_STATUSES.propertyViolated,
+          counterexample: violatedVerification.counterexample,
+          business_summary: 'Заявка отменена и исполнена.',
+          root_cause: ROOT_CAUSES.agentError,
+          hypothesis: 'P1 запрещает отмену вместо исполнения отменённой заявки.',
+          question: 'Должна ли отменённая заявка исполняться?',
+        })}
+        isDetailsOpen={false}
+        onToggleDetails={vi.fn()}
+        onAnswer={async () => undefined}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Модель ошибочна' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Что нужно уточнить' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Отправить уточнение' })).not.toBeInTheDocument()
   })
 })

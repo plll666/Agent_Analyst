@@ -8,13 +8,15 @@ import { Icon } from '../components/Icon'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
 import { Skeleton } from '../components/Skeleton'
+import { ReasoningToggle } from '../features/analysis/ReasoningToggle'
 import { VerificationDetails } from '../features/analysis/VerificationDetails'
 import { VerificationHistory } from '../features/analysis/VerificationHistory'
 import { VerificationOutcome } from '../features/analysis/VerificationOutcome'
 import {
-  useBuildModel,
+  useAnswerAnalysis,
+  useLlmCapabilities,
   useModelVersions,
-  useStartVerification,
+  useStartAnalysis,
   useVerifications,
 } from '../features/analysis/useAnalysis'
 import { ProjectHeader } from '../features/projects/ProjectHeader'
@@ -53,8 +55,9 @@ export function AnalysisPage() {
   const modelsQuery = useModelVersions(projectId)
   const requirementsQuery = useRequirements(projectId)
   const verificationsQuery = useVerifications(projectId)
-  const startMutation = useStartVerification(projectId)
-  const buildMutation = useBuildModel(projectId)
+  const startMutation = useStartAnalysis(projectId)
+  const answerMutation = useAnswerAnalysis(projectId)
+  const capabilitiesQuery = useLlmCapabilities()
 
   const rootRef = useRef<HTMLDivElement>(null)
   const heroRef = useRef<HTMLDivElement>(null)
@@ -64,6 +67,9 @@ export function AnalysisPage() {
   const [selectedVerificationId, setSelectedVerificationId] = useState<string | null>(null)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
   const [isDetailsMounted, setIsDetailsMounted] = useState(false)
+  // По умолчанию рассуждаем: качество модели важнее скорости. Если провайдер
+  // не умеет или рассуждает всегда, выбор не показывается и не отправляется.
+  const [reasoning, setReasoning] = useState(true)
 
   const project = projectQuery.data ?? null
 
@@ -74,13 +80,11 @@ export function AnalysisPage() {
   const currentModel = models.at(0) ?? null
   const requirements = requirementsQuery.data ?? []
   const currentRequirement = requirements.find((requirement) => requirement.is_current) ?? null
-  const isModelStale =
-    currentRequirement !== null &&
-    currentModel !== null &&
-    currentModel.requirement_id !== currentRequirement.id
-  const needsModelBuild = currentRequirement !== null && (currentModel === null || isModelStale)
   const canAnalyze = currentRequirement !== null
-  const isStarting = startMutation.isPending || buildMutation.isPending
+  const isStarting = startMutation.isPending
+  const reasoningChoice =
+    capabilitiesQuery.data?.reasoning.available === true &&
+    !capabilitiesQuery.data.reasoning.always_on
   const selectedVerification =
     verifications.find((verification) => verification.id === selectedVerificationId) ??
     verifications.at(0) ??
@@ -213,19 +217,17 @@ export function AnalysisPage() {
       return
     }
 
-    void (async () => {
-      if (needsModelBuild) {
-        try {
-          await buildMutation.mutateAsync(currentRequirement.id)
-        } catch {
-          return
-        }
-      }
-
-      startMutation.mutate(undefined, {
+    startMutation.mutate(
+      { requirementId: currentRequirement.id, reasoning: reasoningChoice ? reasoning : null },
+      {
         onSuccess: (verification: Verification) => setSelectedVerificationId(verification.id),
-      })
-    })()
+      },
+    )
+  }
+
+  const handleAnswer = async (verificationId: string, answer: string) => {
+    const next = await answerMutation.mutateAsync({ verificationId, answer })
+    setSelectedVerificationId(next.id)
   }
 
   if (isLoading) {
@@ -291,18 +293,23 @@ export function AnalysisPage() {
             {selectedVerification === null ? (
               <EmptyState
                 icon={<Icon name="clock" className="size-5" />}
-                title="Проверка ещё не запускалась"
+                title="Анализ ещё не запускался"
                 description={
                   canAnalyze
-                    ? 'Запустите проверку — она идёт в фоне, результат появится здесь сам, обновлять страницу не нужно.'
+                    ? 'Запустите анализ — агент построит модель, проверит её и объяснит результат. Всё идёт в фоне, страницу обновлять не нужно.'
                     : 'Сначала сохраните текст требования: агенту не из чего построить модель.'
                 }
                 className="h-full min-h-72"
                 action={
                   canAnalyze ? (
-                    <Button loading={isStarting} onClick={handleStartAnalysis} size="lg">
-                      {needsModelBuild ? 'Построить модель и проверить' : 'Запустить проверку'}
-                    </Button>
+                    <div className="flex w-full max-w-sm flex-col items-stretch gap-3">
+                      {reasoningChoice && (
+                        <ReasoningToggle checked={reasoning} onChange={setReasoning} />
+                      )}
+                      <Button loading={isStarting} onClick={handleStartAnalysis} size="lg">
+                        Запустить анализ
+                      </Button>
+                    </div>
                   ) : (
                     <Link to={`/projects/${project.id}`}>
                       <Button size="lg" variant="secondary">
@@ -318,6 +325,10 @@ export function AnalysisPage() {
                 verification={selectedVerification}
                 isDetailsOpen={isDetailsOpen}
                 onToggleDetails={handleToggleDetails}
+                onAnswer={
+                  canAnalyze ? (answer) => handleAnswer(selectedVerification.id, answer) : undefined
+                }
+                isAnswering={answerMutation.isPending}
               />
             )}
           </div>
@@ -328,19 +339,18 @@ export function AnalysisPage() {
             data-panel
             className="flex flex-col gap-3 rounded-card border border-line bg-surface/70 p-5 shadow-card"
           >
-            <h2 className="text-sm font-semibold tracking-tight">Проверить заново</h2>
+            <h2 className="text-sm font-semibold tracking-tight">Запустить заново</h2>
             <p className="text-xs leading-relaxed text-muted">
               {currentRequirement === null
                 ? 'Сначала сохраните текст требования — модель строится из него'
-                : isModelStale
-                  ? 'Требование изменилось после построения модели: перед проверкой агент построит новую версию'
-                  : currentModel === null
-                    ? 'Модель ещё не построена: агент построит её по текущему требованию'
-                    : `Проверяется модель v${viewedModel?.version ?? currentModel.version} по сохранённому тексту требования`}
+                : 'Каждый запуск — новая итерация: агент строит модель по текущему тексту требования и проверяет её движком'}
             </p>
+            {reasoningChoice && (
+              <ReasoningToggle checked={reasoning} onChange={setReasoning} disabled={isStarting} />
+            )}
             {canAnalyze ? (
               <Button className="w-full" loading={isStarting} onClick={handleStartAnalysis}>
-                {needsModelBuild ? 'Построить модель и проверить' : 'Запустить проверку'}
+                Запустить анализ
               </Button>
             ) : (
               <Link className="w-full" to={`/projects/${project.id}`}>

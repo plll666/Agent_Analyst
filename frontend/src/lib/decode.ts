@@ -13,6 +13,7 @@ import type {
   Effect,
   Expression,
   Literal,
+  LlmCapabilities,
   ModelProperty,
   ModelState,
   ModelTransition,
@@ -400,7 +401,8 @@ export const decodeVerification: Decoder<Verification> = (value) => {
   return {
     id: readString(source, 'id'),
     project_id: readString(source, 'project_id'),
-    model_version_id: readString(source, 'model_version_id'),
+    model_version_id: readNullableString(source, 'model_version_id'),
+    requirement_id: readNullableString(source, 'requirement_id'),
     property_id: readNullableString(source, 'property_id'),
     status: status as VerificationStatus,
     engine: readString(source, 'engine'),
@@ -424,7 +426,24 @@ export const decodeVerification: Decoder<Verification> = (value) => {
     hypothesis: readNullableString(source, 'hypothesis'),
     question: readNullableString(source, 'question'),
     root_cause: rootCause === null || rootCause === undefined ? null : (rootCause as RootCause),
+    reasoning: typeof source['reasoning'] === 'boolean' ? source['reasoning'] : null,
     created_at: readString(source, 'created_at'),
+  }
+}
+
+export const decodeLlmCapabilities: Decoder<LlmCapabilities> = (value) => {
+  const source = expectRecord(value)
+  const reasoning = expectRecord(source['reasoning'])
+  const available = reasoning['available']
+
+  return {
+    model: readString(source, 'model'),
+    reasoning: {
+      available: typeof available === 'boolean' ? available : null,
+      always_on: reasoning['always_on'] === true,
+      source: typeof reasoning['source'] === 'string' ? reasoning['source'] : 'unknown',
+      detail: readNullableString(reasoning, 'detail'),
+    },
   }
 }
 

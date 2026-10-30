@@ -2,18 +2,16 @@ import { useState } from 'react'
 
 import { cn } from '../../lib/cn'
 import { formatDateTime } from '../../lib/format'
-import { VERIFICATION_STATUSES } from '../../types/api'
+import { ROOT_CAUSES, VERIFICATION_STATUSES } from '../../types/api'
 import type { Verification } from '../../types/api'
+import { Button } from '../../components/Button'
 import { Icon } from '../../components/Icon'
+import { Textarea } from '../../components/Textarea'
 import { CounterexampleSteps } from './CounterexampleSteps'
 import { EventChain } from './EventChain'
 import { VerificationStatusBadge } from './VerificationStatusBadge'
 import { ROOT_CAUSE_META } from './rootCause'
-import {
-  HOLDS_EXPLANATION,
-  INCONCLUSIVE_EXPLANATION,
-  VERIFICATION_STATUS_META,
-} from './verificationStatus'
+import { HOLDS_EXPLANATION, INCONCLUSIVE_EXPLANATION, verificationMeta } from './verificationStatus'
 
 const INCONCLUSIVE_STATUSES: Verification['status'][] = [
   VERIFICATION_STATUSES.timeout,
@@ -59,28 +57,88 @@ function AdviceBlock({ title, text }: { title: string; text: string }) {
   )
 }
 
+function AnswerForm({
+  onSubmit,
+  isSubmitting,
+}: {
+  onSubmit: (answer: string) => Promise<void>
+  isSubmitting: boolean
+}) {
+  const [answer, setAnswer] = useState('')
+  const trimmed = answer.trim()
+
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-field border border-bone/30 bg-bone-soft/20 px-4 py-3.5"
+      onSubmit={(event) => {
+        event.preventDefault()
+
+        if (trimmed === '' || isSubmitting) {
+          return
+        }
+
+        void onSubmit(trimmed)
+      }}
+    >
+      <label className="eyebrow" htmlFor="agent-answer">
+        Ваш ответ
+      </label>
+      <Textarea
+        id="agent-answer"
+        rows={3}
+        value={answer}
+        onChange={(event) => setAnswer(event.target.value)}
+        placeholder="Например: отменённая заявка исполняться не должна"
+        disabled={isSubmitting}
+      />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-md text-xs leading-relaxed text-subtle">
+          Ответ станет новой версией требования: агент построит по нему новую модель и проверит её
+          заново.
+        </p>
+        <Button type="submit" loading={isSubmitting} disabled={trimmed === ''}>
+          Отправить уточнение
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 export interface VerificationOutcomeProps {
   verification: Verification
   isDetailsOpen: boolean
   onToggleDetails: () => void
+  onAnswer?: ((answer: string) => Promise<void>) | undefined
+  isAnswering?: boolean
 }
 
 export function VerificationOutcome({
   verification,
   isDetailsOpen,
   onToggleDetails,
+  onAnswer,
+  isAnswering = false,
 }: VerificationOutcomeProps) {
   const [isStepsOpen, setIsStepsOpen] = useState(false)
 
-  const meta = VERIFICATION_STATUS_META[verification.status]
+  const meta = verificationMeta(verification)
   const isHolds = verification.status === VERIFICATION_STATUSES.propertyHolds
   const isInconclusive = INCONCLUSIVE_STATUSES.includes(verification.status)
+  const isAgentMisread =
+    verification.status === VERIFICATION_STATUSES.propertyViolated &&
+    verification.root_cause === ROOT_CAUSES.agentError
+  // Ошибку модели агент исправляет сам: вопроса к требованию здесь нет.
+  const showsQuestion = verification.question !== null && !isAgentMisread
 
   return (
     <section className="flex h-full flex-col gap-6 rounded-card border border-line bg-surface/70 p-6 shadow-card @lg:p-8">
       <header className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <VerificationStatusBadge status={verification.status} detailed />
+          <VerificationStatusBadge
+            status={verification.status}
+            rootCause={verification.root_cause}
+            detailed
+          />
           <span className="text-xs text-subtle">{formatDateTime(verification.created_at)}</span>
         </div>
 
@@ -153,9 +211,13 @@ export function VerificationOutcome({
         <AdviceBlock title="Что, скорее всего, не так" text={verification.hypothesis} />
       )}
 
-      {verification.question === null ? null : (
-        <AdviceBlock title="Что нужно уточнить" text={verification.question} />
-      )}
+      {showsQuestion ? (
+        <AdviceBlock title="Что нужно уточнить" text={verification.question ?? ''} />
+      ) : null}
+
+      {showsQuestion && onAnswer !== undefined && !meta.isPending ? (
+        <AnswerForm onSubmit={onAnswer} isSubmitting={isAnswering} />
+      ) : null}
 
       {verification.related_requirements.length === 0 ? null : (
         <section className="flex flex-col gap-3">

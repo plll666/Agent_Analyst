@@ -224,7 +224,8 @@ export interface RelatedRequirement {
 export interface Verification {
   id: string
   project_id: string
-  model_version_id: string
+  model_version_id: string | null
+  requirement_id: string | null
   property_id: string | null
   status: VerificationStatus
   engine: string
@@ -238,7 +239,19 @@ export interface Verification {
   hypothesis: string | null
   question: string | null
   root_cause: RootCause | null
+  /** Выбор пользователя: рассуждала ли модель; null — режим не выбирали. */
+  reasoning?: boolean | null
   created_at: string
+}
+
+export interface LlmCapabilities {
+  model: string
+  reasoning: {
+    available: boolean | null
+    always_on: boolean
+    source: string
+    detail: string | null
+  }
 }
 
 export interface ProfileSummary {

@@ -5,16 +5,23 @@ import { toUserMessage } from '../../lib/errors'
 import { queryKeys } from '../../lib/queryKeys'
 import type { Verification } from '../../types/api'
 import {
-  buildModel,
+  answerAnalysis,
+  fetchLlmCapabilities,
   fetchModelVersions,
   fetchVerifications,
-  startVerification,
+  startAnalysis,
 } from './analysisApi'
+import type { StartAnalysisPayload } from './analysisApi'
 
 export const POLL_INTERVAL_MS = 2000
 
 const hasPendingVerification = (verifications: Verification[]): boolean =>
   verifications.some((verification) => verification.status === 'PENDING')
+
+export interface AnswerPayload {
+  verificationId: string
+  answer: string
+}
 
 export function useModelVersions(projectId: string) {
   return useQuery({
@@ -37,42 +44,63 @@ export function useVerifications(projectId: string) {
   })
 }
 
-export function useStartVerification(projectId: string) {
+export function useLlmCapabilities() {
+  return useQuery({
+    queryKey: queryKeys.llmCapabilities,
+    queryFn: fetchLlmCapabilities,
+    // Возможности модели меняются только вместе с настройками сервера.
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  })
+}
+
+export function useStartAnalysis(projectId: string) {
   const queryClient = useQueryClient()
   const { push } = useToast()
 
   return useMutation({
-    mutationFn: () => startVerification(projectId),
+    mutationFn: (payload: StartAnalysisPayload) => startAnalysis(projectId, payload),
     onSuccess: (verification) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.verifications(projectId) })
       push({
         tone: 'info',
-        title: 'Проверка поставлена в очередь',
-        description: 'Статус обновится сам — страницу перезагружать не нужно',
+        title: 'Анализ запущен',
+        description: 'Агент построит модель и проверит её — статус обновится сам',
       })
       return verification
+    },
+    onError: (error) => {
+      push({
+        tone: 'danger',
+        title: 'Анализ не запущен',
+        description: toUserMessage(error),
+      })
     },
   })
 }
 
-export function useBuildModel(projectId: string) {
+export function useAnswerAnalysis(projectId: string) {
   const queryClient = useQueryClient()
   const { push } = useToast()
 
   return useMutation({
-    mutationFn: (requirementId: string) => buildModel(projectId, requirementId),
-    onSuccess: (model) => {
+    mutationFn: ({ verificationId, answer }: AnswerPayload) =>
+      answerAnalysis(projectId, verificationId, answer),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.verifications(projectId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.models(projectId) })
+      // Ответ становится новой версией требования: список версий тоже устарел.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.requirements(projectId) })
       push({
-        tone: 'success',
-        title: `Модель v${model.version} построена`,
-        description: 'Теперь требование можно проверить',
+        tone: 'info',
+        title: 'Уточнение принято',
+        description: 'Агент строит модель по новой версии требования',
       })
     },
     onError: (error) => {
       push({
         tone: 'danger',
-        title: 'Модель не построена',
+        title: 'Уточнение не отправлено',
         description: toUserMessage(error),
       })
     },
