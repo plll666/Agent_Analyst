@@ -5,17 +5,14 @@
 и только по явному запросу пользователя.
 """
 
-import hashlib
-import json
 import uuid
-from collections.abc import Mapping
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.llm import LLMClient
 from app.agent.modeler import build_model
 from app.database.models import ModelVersion, Requirement
+from app.domain.behavioral_model import schema_hash
 from app.repositories import runs
 
 
@@ -65,19 +62,3 @@ async def build_model_version(
     if record is None:
         raise ProjectNotFoundError(f"проект {project_id} не найден")
     return record
-
-
-def schema_hash(document: Mapping[str, Any]) -> str:
-    """Посчитать хэш документа модели.
-
-    Каноническая форма (сортировка ключей, без пробелов) нужна, чтобы хэш
-    отличал реальное изменение модели от смены промпта и порядка ключей.
-
-    Args:
-        document: Документ модели в JSON-виде.
-
-    Returns:
-        SHA-256 в hex.
-    """
-    canonical = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

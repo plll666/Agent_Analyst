@@ -6,7 +6,7 @@ from app.agent.explainer import explain_result
 from app.agent.llm import LLMResponseError
 from app.domain.behavioral_model import BehavioralModel
 from app.domain.verification import RootCause, VerificationResult, VerificationStatus
-from tests.agent.support import FakeLLM, explanation_payload, model_payload, violated_result
+from tests.agent.support import FakeLLM, domain_model, explanation_payload, violated_result
 
 REQUIREMENT = (
     "Заявка после согласования может быть исполнена. "
@@ -15,7 +15,7 @@ REQUIREMENT = (
 
 
 def _model() -> BehavioralModel:
-    return BehavioralModel.model_validate(model_payload())
+    return domain_model()
 
 
 def _result() -> VerificationResult:
@@ -63,6 +63,20 @@ async def test_rejects_quote_that_is_not_in_requirement() -> None:
     assert "не встречается в тексте" in " ".join(raised.value.problems)
 
 
+async def test_rejects_short_quote() -> None:
+    """Одна буква не подтверждает связь контрпримера с требованием."""
+    payload = explanation_payload()
+    payload["related_requirements"] = [{"paragraph_ref": None, "quote": "и"}]
+    client = FakeLLM(payload)
+
+    with pytest.raises(LLMResponseError) as raised:
+        await explain_result(
+            client, requirement_text=REQUIREMENT, model=_model(), result=_result(), attempts=1
+        )
+
+    assert "слишком короткая" in " ".join(raised.value.problems)
+
+
 async def test_rejects_unknown_root_cause() -> None:
     payload = explanation_payload()
     payload["root_cause"] = "BAD_LUCK"
@@ -73,7 +87,7 @@ async def test_rejects_unknown_root_cause() -> None:
             client, requirement_text=REQUIREMENT, model=_model(), result=_result(), attempts=1
         )
 
-    assert "неизвестный root_cause" in " ".join(raised.value.problems)
+    assert "MISSING_RULE" in " ".join(raised.value.problems)
 
 
 async def test_rejects_empty_question() -> None:
@@ -86,7 +100,7 @@ async def test_rejects_empty_question() -> None:
             client, requirement_text=REQUIREMENT, model=_model(), result=_result(), attempts=1
         )
 
-    assert "question" in " ".join(raised.value.problems)
+    assert "вопрос" in " ".join(raised.value.problems)
 
 
 async def test_refuses_to_explain_non_violation() -> None:

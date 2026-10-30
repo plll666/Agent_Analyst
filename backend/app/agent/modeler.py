@@ -1,16 +1,17 @@
 """Построение ``BehavioralModel`` из текста требования.
 
-Агент отвечает за смысл, домен — за форму: ответ модели проходит
-``BehavioralModel.model_validate`` до того, как попадёт в базу или в движок.
-Невалидный документ не сохраняется, а возвращается вызывающей стороне как ошибка
-с перечнем нарушений.
+Агент отвечает за смысл, домен — за форму: ответ модели проверяется моделью
+ответа (:mod:`app.agent.schema_models`), которая строит ``BehavioralModel`` до
+того, как документ попадёт в базу или в движок. Невалидный документ не
+сохраняется: Instructor переспрашивает модель, а исчерпание попыток становится
+``LLMResponseError`` с перечнем нарушений.
 """
 
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Sequence
 
-from app.agent.llm import LLMClient, request_validated
+from app.agent.llm import LLMClient
 from app.agent.prompts import MODELING_PROMPT_VERSION, MODELING_SYSTEM, modeling_user
+from app.agent.schema_models import WireModelDocument
 from app.domain.behavioral_model import BehavioralModel
 
 
@@ -20,6 +21,7 @@ async def build_model(
     requirement_text: str,
     attempts: int,
     feedback: Sequence[str] = (),
+    reasoning: bool | None = None,
 ) -> BehavioralModel:
     """Превратить текст требования в проверяемую модель.
 
@@ -28,35 +30,22 @@ async def build_model(
         requirement_text: Исходное описание модуля.
         attempts: Сколько попыток дать модели на исправление документа.
         feedback: Замечания к прошлой модели, если модель строится заново.
+        reasoning: Рассуждать ли модели до ответа; ``None`` — поведение
+            провайдера по умолчанию.
 
     Returns:
         Валидная модель; её домены конечны и все ссылки разрешены.
 
     Raises:
         LLMResponseError: за отведённые попытки валидная модель не получилась.
-        LLMError: провайдер недоступен или вернул не JSON.
+        LLMError: провайдер недоступен или отказал в запросе.
     """
-    return await request_validated(
-        client,
+    document = await client.parse(
+        WireModelDocument,
         system=MODELING_SYSTEM,
         user=modeling_user(requirement_text, feedback),
         prompt_version=MODELING_PROMPT_VERSION,
         attempts=attempts,
-        parse=_parse_model,
+        reasoning=reasoning,
     )
-
-
-def _parse_model(payload: Mapping[str, Any]) -> BehavioralModel:
-    """Достать документ из ответа и проверить его доменом.
-
-    Обёртки ``{"document": ...}`` и ``{"model": ...}`` принимаются, потому что
-    модели иногда добавляют их вопреки инструкции; всё остальное отвергает сам
-    ``BehavioralModel`` (``extra="forbid"``).
-    """
-    document: Mapping[str, Any] = payload
-    for key in ("document", "model"):
-        nested = payload.get(key)
-        if isinstance(nested, Mapping):
-            document = nested
-            break
-    return BehavioralModel.model_validate(document)
+    return document.to_domain()

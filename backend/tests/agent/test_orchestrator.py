@@ -10,7 +10,7 @@ from app.domain.verification import (
     VerificationResult,
     VerificationStatus,
 )
-from tests.agent.support import FailingLLM, FakeLLM, explanation_payload
+from tests.agent.support import FailingLLM, FakeLLM, explanation_payload, to_wire_model
 from tests.domain.case_examples import CASE_RESULT_VIOLATED
 
 REQUIREMENT = (
@@ -93,7 +93,7 @@ async def _iterate(client: Any, check_property: Any = _violated) -> Iteration:
 
 async def test_violation_ends_with_a_question_for_the_user() -> None:
     """Нарушение — единственный повод спросить: пользователю есть что уточнять."""
-    client = FakeLLM(_cited_model(), explanation_payload())
+    client = FakeLLM(to_wire_model(_cited_model()), explanation_payload())
 
     iteration = await _iterate(client)
 
@@ -108,7 +108,7 @@ async def test_violation_ends_with_a_question_for_the_user() -> None:
 
 async def test_holds_stops_without_asking_the_model_for_an_explanation() -> None:
     """Нет нарушения — нет сценария, и модель про пересказ не зовётся."""
-    client = FakeLLM(_cited_model())
+    client = FakeLLM(to_wire_model(_cited_model()))
 
     iteration = await _iterate(client, _holds)
 
@@ -121,7 +121,9 @@ async def test_holds_stops_without_asking_the_model_for_an_explanation() -> None
 
 async def test_gate_rejection_rebuilds_the_model() -> None:
     """Модель без цитат не идёт в движок: агент перестраивает её."""
-    client = FakeLLM(_uncited_model(), _cited_model(), explanation_payload())
+    client = FakeLLM(
+        to_wire_model(_uncited_model()), to_wire_model(_cited_model()), explanation_payload()
+    )
 
     iteration = await _iterate(client)
 
@@ -132,7 +134,11 @@ async def test_gate_rejection_rebuilds_the_model() -> None:
 
 async def test_gate_that_never_passes_ends_the_iteration_with_agent_error() -> None:
     """Ворота не пропускают — итерация честно останавливается, а не крутится."""
-    client = FakeLLM(_uncited_model(), _uncited_model(), _uncited_model())
+    client = FakeLLM(
+        to_wire_model(_uncited_model()),
+        to_wire_model(_uncited_model()),
+        to_wire_model(_uncited_model()),
+    )
 
     iteration = await _iterate(client)
 
@@ -158,7 +164,7 @@ async def test_unavailable_provider_ends_the_iteration_with_agent_error() -> Non
 
 async def test_engine_result_is_not_overwritten_by_the_agent() -> None:
     """Движок сказал — агент не переписывает: контрпример остаётся движковым."""
-    client = FakeLLM(_cited_model(), explanation_payload())
+    client = FakeLLM(to_wire_model(_cited_model()), explanation_payload())
 
     iteration = await _iterate(client)
 

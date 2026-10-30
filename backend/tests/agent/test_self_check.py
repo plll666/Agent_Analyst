@@ -141,3 +141,37 @@ def test_quote_may_be_a_prefix_of_the_text() -> None:
     document["transitions"][0]["source_reference"] = "Заявка после согласования"
 
     assert check(_model(document), REQUIREMENT) == []
+
+
+def test_one_letter_quote_is_rejected() -> None:
+    """Одна буква — подстрока, но не подтверждение правила."""
+    document = _document()
+    document["transitions"][0]["source_reference"] = "и"
+
+    problems = check(_model(document), REQUIREMENT)
+
+    assert any(
+        "переход 'Approve'" in problem and "слишком короткая" in problem for problem in problems
+    )
+
+
+def test_single_word_quote_is_rejected() -> None:
+    """Одно длинное слово — всё ещё не фраза, подтверждающая правило."""
+    document = _document()
+    document["transitions"][0]["source_reference"] = "Пользователь"
+
+    problems = check(_model(document), REQUIREMENT)
+
+    assert any(
+        "переход 'Approve'" in problem and "минимум 2 слова" in problem for problem in problems
+    )
+
+
+def test_quote_inside_a_word_is_rejected() -> None:
+    """Обрывок слова не должен становиться ссылкой на требование."""
+    document = _document()
+    document["transitions"][0]["source_reference"] = "явка после согласования"
+
+    problems = check(_model(document), REQUIREMENT)
+
+    assert any("переход 'Approve'" in problem for problem in problems)

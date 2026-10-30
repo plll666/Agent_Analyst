@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from app.agent.citations import is_quote
+from app.agent.citations import quote_issue
 from app.domain.behavioral_model import BehavioralModel
 from app.domain.expressions import AndExpr, Effect, EqExpr, Expression, InExpr, VarExpr
 
@@ -82,10 +82,11 @@ def _citation_problem(citation: str | None, requirement_text: str, subject: str)
             f"{subject} не ссылается на текст требования: "
             "укажи дословную цитату, из которой правило взято"
         ]
-    if not is_quote(requirement_text, citation):
+    issue = quote_issue(requirement_text, citation)
+    if issue is not None:
         return [
-            f"{subject} ссылается на текст, которого нет в требовании: "
-            f"цитата {citation.strip()!r} должна быть дословным фрагментом требования"
+            f"{subject}: {issue}; цитата {citation.strip()!r}. "
+            "Нужна дословная цитата из текста требования"
         ]
     return []
 
