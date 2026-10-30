@@ -134,6 +134,7 @@ async def client(
     # Подменяется именно в модуле роутера: enqueue_check вызывается напрямую, а не
     # через Depends, поэтому app.dependency_overrides его не увидит.
     monkeypatch.setattr(analysis, "enqueue_check", record)
+    monkeypatch.setattr(analysis, "enqueue_analysis", record)
     app.dependency_overrides[get_session] = lambda: session
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http_client:

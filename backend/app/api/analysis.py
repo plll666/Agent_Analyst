@@ -2,9 +2,10 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, StringConstraints, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.capabilities import detect_reasoning
 from app.agent.llm import (
     LLMConfigurationError,
     LLMError,
@@ -19,8 +20,9 @@ from app.database.models import ModelVersion, Requirement, User
 from app.database.models import Verification as VerificationRecord
 from app.db import get_session
 from app.domain.behavioral_model import BehavioralModel
+from app.domain.verification import RootCause
 from app.errors import LLM_UNAVAILABLE, NOT_FOUND, VALIDATION_ERROR, ApiError
-from app.queue import enqueue_check
+from app.queue import enqueue_analysis, enqueue_check
 from app.repositories import projects as projects_repo
 from app.repositories import runs
 from app.repositories.runs import verification_to_domain
@@ -35,12 +37,22 @@ class ModelBuildIn(BaseModel):
     requirement_id: uuid.UUID | None = None
 
 
+class AnalysisStartIn(BaseModel):
+    requirement_id: uuid.UUID | None = None
+    reasoning: bool | None = None
+
+
+class AnalysisAnswerIn(BaseModel):
+    answer: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 class ModelVersionOut(BaseModel):
     id: str
     project_id: str
     version: int
     source: str
     requirement_id: str | None = None
+    parent_version_id: str | None = None
     schema_hash: str
     validation_status: str
     validation_errors: list[str]
@@ -55,6 +67,7 @@ def _model_out(record: ModelVersion) -> ModelVersionOut:
         version=record.version,
         source=record.source,
         requirement_id=str(record.requirement_id) if record.requirement_id else None,
+        parent_version_id=str(record.parent_version_id) if record.parent_version_id else None,
         schema_hash=record.schema_hash,
         validation_status=record.validation_status,
         validation_errors=list(record.validation_errors or []),
@@ -71,6 +84,8 @@ def _verification_out(record: VerificationRecord) -> dict[str, Any]:
             "id": str(record.id),
             "project_id": str(record.project_id),
             "model_version_id": (str(record.model_version_id) if record.model_version_id else None),
+            "requirement_id": (str(record.requirement_id) if record.requirement_id else None),
+            "reasoning": record.reasoning,
             "created_at": record.created_at.isoformat(),
         }
     )
@@ -164,6 +179,146 @@ async def _resolve_requirement(
     if found is None or found.project_id != project_id:
         raise ApiError(404, NOT_FOUND, "Требование не найдено в этом проекте")
     return found
+
+
+@router.post("/projects/{project_id}/analyses", status_code=status.HTTP_201_CREATED)
+async def start_analysis(
+    project_id: uuid.UUID,
+    payload: AnalysisStartIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Запустить итерацию агента.
+
+    Агент строит модель по тексту требования, проверяет её детерминированным
+    движком и объясняет результат. Всё это происходит в фоне: запрос отвечает
+    сразу прогоном в статусе ``PENDING``, а результат появляется позже.
+    """
+    await _owned_project(session, project_id, user)
+    requirement = await _resolve_requirement(session, project_id, payload.requirement_id, user)
+    if requirement is None:
+        raise ApiError(
+            422, VALIDATION_ERROR, "Сначала сохраните текст требования: анализировать нечего"
+        )
+    _assert_llm_configured()
+
+    await _assert_reasoning_supported(payload.reasoning)
+    pending = await runs.create_pending_verification(
+        session,
+        project_id=project_id,
+        model_version_id=None,
+        engine=ENGINE_WHEN_RUN,
+        # Требование фиксируется при запуске: воркер обязан проверить именно
+        # выбранный текст, а не тот, что станет «текущим», пока задача ждёт.
+        requirement_id=requirement.id,
+        reasoning=payload.reasoning,
+    )
+    await session.commit()
+    await enqueue_analysis(str(pending.id), reasoning=payload.reasoning)
+    await session.refresh(pending)
+    return _verification_out(pending)
+
+
+@router.post(
+    "/projects/{project_id}/analyses/{verification_id}/answer",
+    status_code=status.HTTP_201_CREATED,
+)
+async def answer_analysis(
+    project_id: uuid.UUID,
+    verification_id: uuid.UUID,
+    payload: AnalysisAnswerIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Ответить на вопрос агента и начать следующую итерацию.
+
+    Ответ не правит модель: он дополняет текст требования, и агент строит по
+    нему новую версию модели. Прежние версии требования и модели остаются
+    на месте — из них и складывается цепочка итераций.
+    """
+    await _owned_project(session, project_id, user)
+    record = await runs.get_verification_for_owner(session, verification_id, user.id)
+    if record is None or record.project_id != project_id:
+        raise ApiError(404, NOT_FOUND, "Прогон не найден в этом проекте")
+    if not record.question:
+        raise ApiError(422, VALIDATION_ERROR, "У этого прогона нет вопроса: отвечать не на что")
+    if record.root_cause == RootCause.AGENT_ERROR:
+        raise ApiError(
+            422,
+            VALIDATION_ERROR,
+            "Объяснение признало ошибку модели: это не вопрос к требованию, отвечать не на что",
+        )
+    current = await projects_repo.current_requirement(session, project_id)
+    if current is None:
+        raise ApiError(422, VALIDATION_ERROR, "Сначала сохраните текст требования")
+    _assert_llm_configured()
+
+    clarified = await projects_repo.add_requirement_version(
+        session,
+        project_id,
+        raw_text=f"{current.raw_text}\n\nУточнение пользователя: {payload.answer}",
+        created_by=user.id,
+    )
+    if clarified is None:
+        raise ApiError(404, NOT_FOUND, "Проект не найден")
+    pending = await runs.create_pending_verification(
+        session,
+        project_id=project_id,
+        model_version_id=None,
+        engine=ENGINE_WHEN_RUN,
+        # Прогон ссылается на уточнённый текст, а не на предыдущий.
+        requirement_id=clarified.id,
+        reasoning=record.reasoning,
+    )
+    await session.commit()
+    await enqueue_analysis(str(pending.id), reasoning=record.reasoning)
+    await session.refresh(pending)
+    return _verification_out(pending)
+
+
+async def _assert_reasoning_supported(reasoning: bool | None) -> None:
+    """Не принимать выбор, который провайдер не умеет выполнить.
+
+    Проверка нужна только когда режим выбран явно: без выбора параметр не
+    передаётся, и провайдер работает по своему умолчанию. Неизвестный ответ
+    пробы (``None``) не блокирует запуск: сеть могла моргнуть, а галочка на
+    фронте и так появляется только при подтверждённой поддержке.
+    """
+    if reasoning is None:
+        return
+    capability = await detect_reasoning(LLMSettings.from_env())
+    if capability.available is False:
+        raise ApiError(
+            422,
+            VALIDATION_ERROR,
+            "Модель не поддерживает рассуждения: "
+            + (capability.detail or "провайдер не принимает этот режим"),
+        )
+
+
+@router.get("/llm/capabilities")
+async def llm_capabilities(
+    _: Annotated[User, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Что умеет настроенная модель: сейчас — только режим рассуждений.
+
+    Фронт спрашивает это перед показом галочки, поэтому ответ кешируется в
+    процессе и не ходит к провайдеру на каждое открытие страницы.
+    """
+    settings = LLMSettings.from_env()
+    capability = await detect_reasoning(settings)
+    return {"model": settings.model, "reasoning": capability.as_dict()}
+
+
+def _assert_llm_configured() -> None:
+    """Проверить, что провайдер настроен, до постановки задачи в очередь."""
+    settings = LLMSettings.from_env()
+    if not settings.is_configured:
+        raise ApiError(
+            503,
+            LLM_UNAVAILABLE,
+            "LLM не настроена: не заданы " + ", ".join(settings.missing()),
+        )
 
 
 @router.post(
