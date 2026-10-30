@@ -13,8 +13,13 @@ x-backend-env: &backend-env
   LLM_BASE_URL: ${LLM_BASE_URL:-}
   LLM_API_KEY: ${LLM_API_KEY:-}
   LLM_MODEL: ${LLM_MODEL:-}
-  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-180}
   LLM_MAX_ATTEMPTS: ${LLM_MAX_ATTEMPTS:-3}
+  LLM_STRUCTURED_MODE: ${LLM_STRUCTURED_MODE:-json}
+  LLM_TRANSPORT_RETRIES: ${LLM_TRANSPORT_RETRIES:-2}
+  LLM_TRANSPORT_BACKOFF_SECONDS: ${LLM_TRANSPORT_BACKOFF_SECONDS:-0.5}
+  LLM_REASONING_SUPPORTED: ${LLM_REASONING_SUPPORTED:-auto}
+  LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-high}
   # Провайдер за корпоративным корнем (Минцифры): контейнерный bundle его не знает,
   # поэтому подключаем trust store хоста только для процессов бэкенда и воркера.
   SSL_CERT_FILE: /opt/host-ca.crt
