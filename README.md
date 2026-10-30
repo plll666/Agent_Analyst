@@ -70,11 +70,14 @@ cd backend && uv sync
 cd backend && uv run alembic upgrade head
 
 cd backend  && uv run uvicorn app.main:app --reload --port 8000
-cd backend  && uv run arq app.worker.WorkerSettings
+cd backend  && uv run arq app.worker.main.WorkerSettings
 cd frontend && npm run dev
 ```
 
 Проверить, что всё живо: <http://localhost:5173> и <http://localhost:8000/health>.
+
+Адрес Redis воркер берёт из `REDIS_URL` (в `docker compose` она задана; локально
+по умолчанию — `redis://localhost:6379/0`), базу — из `DATABASE_URL` в `.env`.
 
 ## Оформление
 

@@ -193,8 +193,17 @@ REQUIREMENT_TEXT = (
 class _BrokenLLM:
     """Провайдер, который недоступен: результат всё равно должен сохраниться."""
 
-    async def complete_json(self, *, system: str, user: str, prompt_version: str) -> dict[str, Any]:
-        del system, user, prompt_version
+    async def parse(
+        self,
+        response_model: Any,
+        *,
+        system: str,
+        user: str,
+        prompt_version: str,
+        attempts: int,
+        context: Any = None,
+    ) -> Any:
+        del response_model, system, user, prompt_version, attempts, context
         raise LLMError("нет сети")
 
     async def aclose(self) -> None:

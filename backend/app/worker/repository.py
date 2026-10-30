@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.database.models import Artifact, ModelVersion, Requirement, Verification
 from app.database.session import session_scope
+from app.domain.behavioral_model import BehavioralModel, schema_hash
 from app.domain.verification import (
     RelatedRequirement,
     VerificationExplanation,
@@ -47,6 +48,134 @@ class RunContext:
     model_version_id: uuid.UUID
     document: dict[str, Any]
     requirement_text: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisContext:
+    """Всё, что итерации агента нужно знать до её начала.
+
+    В отличие от :class:`RunContext` модели тут ещё нет: её строит агент, и
+    только после этого прогон получает версию модели.
+    """
+
+    verification_id: uuid.UUID
+    project_id: uuid.UUID
+    requirement_id: uuid.UUID | None
+    requirement_text: str | None
+    model_version_id: uuid.UUID | None
+    parent_model_version_id: uuid.UUID | None
+
+
+RunLike = RunContext | AnalysisContext
+
+
+async def load_analysis_context(
+    sessionmaker: async_sessionmaker[AsyncSession], verification_id: uuid.UUID
+) -> AnalysisContext:
+    """Прочитать проект прогона, зафиксированное требование и предыдущую модель.
+
+    Текст берётся из версии требования, на которую прогон ссылается: требование
+    зафиксировано в момент запуска, и очередь не может подменить вход задачи.
+    Фолбэк на «текущую» версию остаётся только для старых прогонов, созданных до
+    миграции 0006, — у них ссылки нет и восстановить её достоверно нельзя.
+    Предыдущая версия модели нужна как родитель новой — из неё получается
+    цепочка итераций.
+
+    Args:
+        sessionmaker: Фабрика сессий воркера.
+        verification_id: Идентификатор строки ``verifications``.
+
+    Returns:
+        Контекст итерации.
+
+    Raises:
+        VerificationNotFoundError: если строки прогона нет.
+    """
+    async with session_scope(sessionmaker) as session:
+        record = await session.get(Verification, verification_id)
+        if record is None:
+            raise VerificationNotFoundError(f"прогон {verification_id} не найден")
+        requirement = await _requirement(session, record.project_id, record.requirement_id)
+        parent = await session.scalar(
+            select(ModelVersion.id)
+            .where(ModelVersion.project_id == record.project_id)
+            .order_by(ModelVersion.version.desc())
+            .limit(1)
+        )
+    return AnalysisContext(
+        verification_id=record.id,
+        project_id=record.project_id,
+        requirement_id=requirement.id if requirement is not None else None,
+        requirement_text=requirement.raw_text if requirement is not None else None,
+        model_version_id=record.model_version_id,
+        parent_model_version_id=parent,
+    )
+
+
+async def _requirement(
+    session: AsyncSession, project_id: uuid.UUID, requirement_id: uuid.UUID | None
+) -> Requirement | None:
+    """Требование прогона: выбранное при запуске или, для старых строк, текущее."""
+    if requirement_id is not None:
+        return await session.get(Requirement, requirement_id)
+    return await _current_requirement(session, project_id)
+
+
+async def save_model_version(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    context: AnalysisContext,
+    model: BehavioralModel,
+) -> uuid.UUID:
+    """Сохранить построенную агентом модель и вернуть её идентификатор.
+
+    Args:
+        sessionmaker: Фабрика сессий воркера.
+        context: Контекст итерации.
+        model: Модель, прошедшая ворота.
+
+    Returns:
+        Идентификатор сохранённой версии модели.
+
+    Raises:
+        VerificationNotFoundError: если проект исчез.
+    """
+    document = model.model_dump(mode="json")
+    async with session_scope(sessionmaker) as session:
+        record = await runs.create_next_model_version(
+            session,
+            context.project_id,
+            source="agent",
+            document=document,
+            schema_hash=schema_hash(document),
+            validation_status="VALID",
+            requirement_id=context.requirement_id,
+            parent_version_id=context.parent_model_version_id,
+        )
+        if record is None:
+            raise VerificationNotFoundError(f"проект {context.project_id} не найден")
+        return record.id
+
+
+async def attach_model_version(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    verification_id: uuid.UUID,
+    model_version_id: uuid.UUID,
+) -> None:
+    """Привязать прогон к построенной модели.
+
+    Args:
+        sessionmaker: Фабрика сессий воркера.
+        verification_id: Идентификатор строки ``verifications``.
+        model_version_id: Идентификатор версии модели.
+
+    Raises:
+        VerificationNotFoundError: если строки прогона нет.
+    """
+    async with session_scope(sessionmaker) as session:
+        record = await session.get(Verification, verification_id)
+        if record is None:
+            raise VerificationNotFoundError(f"прогон {verification_id} не найден")
+        record.model_version_id = model_version_id
 
 
 async def load_run_context(
@@ -98,17 +227,22 @@ async def _requirement_text(
     if requirement_id is not None:
         linked = await session.get(Requirement, requirement_id)
         return linked.raw_text if linked is not None else None
-    current = await session.scalar(
+    current = await _current_requirement(session, project_id)
+    return current.raw_text if current is not None else None
+
+
+async def _current_requirement(session: AsyncSession, project_id: uuid.UUID) -> Requirement | None:
+    """Текущая версия требования проекта."""
+    return await session.scalar(
         select(Requirement).where(
             Requirement.project_id == project_id, Requirement.is_current.is_(True)
         )
     )
-    return current.raw_text if current is not None else None
 
 
 async def save_result(
     sessionmaker: async_sessionmaker[AsyncSession],
-    run: RunContext,
+    run: RunLike,
     result: VerificationResult,
     explanation: VerificationExplanation,
 ) -> None:
@@ -151,7 +285,7 @@ async def save_result(
 
 async def save_artifact_rows(
     sessionmaker: async_sessionmaker[AsyncSession],
-    run: RunContext,
+    run: RunLike,
     artifacts: list[StoredArtifact],
 ) -> None:
     """Связать сохранённые файлы с прогоном.
