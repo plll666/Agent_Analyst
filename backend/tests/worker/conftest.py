@@ -116,10 +116,11 @@ async def _delete_run(session: AsyncSession, run: SeededRun) -> None:
     """
     from sqlalchemy import delete
 
-    from app.database.models import Artifact
+    from app.database.models import Artifact, Requirement
 
     await session.execute(delete(Artifact).where(Artifact.project_id == run.project_id))
     await session.execute(delete(Verification).where(Verification.project_id == run.project_id))
     await session.execute(delete(ModelVersion).where(ModelVersion.project_id == run.project_id))
+    await session.execute(delete(Requirement).where(Requirement.project_id == run.project_id))
     await session.execute(delete(Project).where(Project.id == run.project_id))
     await session.execute(delete(User).where(User.id == run.owner_id))

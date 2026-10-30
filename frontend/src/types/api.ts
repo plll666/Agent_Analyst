@@ -62,6 +62,7 @@ export const API_ERROR_CODES = {
   notFound: 'NOT_FOUND',
   validation: 'VALIDATION_ERROR',
   malformedResponse: 'MALFORMED_RESPONSE',
+  llmUnavailable: 'LLM_UNAVAILABLE',
 } as const
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES]
@@ -106,6 +107,7 @@ export const VERIFICATION_STATUSES = {
   timeout: 'TIMEOUT',
   stateLimitReached: 'STATE_LIMIT_REACHED',
   engineError: 'ENGINE_ERROR',
+  agentError: 'AGENT_ERROR',
 } as const
 
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[keyof typeof VERIFICATION_STATUSES]
@@ -117,6 +119,7 @@ export const TERMINAL_VERIFICATION_STATUSES: VerificationStatus[] = [
   VERIFICATION_STATUSES.timeout,
   VERIFICATION_STATUSES.stateLimitReached,
   VERIFICATION_STATUSES.engineError,
+  VERIFICATION_STATUSES.agentError,
 ]
 
 export type Literal = string | number | boolean | null
@@ -180,6 +183,7 @@ export interface ModelVersion {
   id: string
   project_id: string
   version: number
+  requirement_id: string | null
   source: ModelSource
   schema_hash: string
   validation_status: ModelValidationStatus
@@ -204,6 +208,14 @@ export interface VerificationStatistics {
   depth: number
 }
 
+export const ROOT_CAUSES = {
+  requirementError: 'REQUIREMENT_ERROR',
+  agentError: 'AGENT_ERROR',
+  missingRule: 'MISSING_RULE',
+} as const
+
+export type RootCause = (typeof ROOT_CAUSES)[keyof typeof ROOT_CAUSES]
+
 export interface RelatedRequirement {
   paragraph_ref: string | null
   quote: string | null
@@ -212,7 +224,8 @@ export interface RelatedRequirement {
 export interface Verification {
   id: string
   project_id: string
-  model_version_id: string
+  model_version_id: string | null
+  requirement_id: string | null
   property_id: string | null
   status: VerificationStatus
   engine: string
@@ -225,7 +238,20 @@ export interface Verification {
   business_summary: string
   hypothesis: string | null
   question: string | null
+  root_cause: RootCause | null
+  /** Выбор пользователя: рассуждала ли модель; null — режим не выбирали. */
+  reasoning?: boolean | null
   created_at: string
+}
+
+export interface LlmCapabilities {
+  model: string
+  reasoning: {
+    available: boolean | null
+    always_on: boolean
+    source: string
+    detail: string | null
+  }
 }
 
 export interface ProfileSummary {

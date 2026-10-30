@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { VERIFICATION_STATUSES } from '../../types/api'
-import { VERIFICATION_STATUS_META } from './verificationStatus'
+import { ROOT_CAUSES, VERIFICATION_STATUSES } from '../../types/api'
+import {
+  AGENT_MISREAD_META,
+  VERIFICATION_STATUS_META,
+  verificationMeta,
+} from './verificationStatus'
 
 const ALL_STATUSES = Object.values(VERIFICATION_STATUSES)
 const SUCCESS_STATUSES = [VERIFICATION_STATUSES.propertyHolds]
@@ -10,11 +14,12 @@ const INCONCLUSIVE_STATUSES = [
   VERIFICATION_STATUSES.stateLimitReached,
   VERIFICATION_STATUSES.modelInvalid,
   VERIFICATION_STATUSES.engineError,
+  VERIFICATION_STATUSES.agentError,
 ]
 
 describe('VERIFICATION_STATUS_META', () => {
-  it('описывает все семь статусов контракта', () => {
-    expect(ALL_STATUSES).toHaveLength(7)
+  it('описывает все восемь статусов контракта', () => {
+    expect(ALL_STATUSES).toHaveLength(8)
     expect(Object.keys(VERIFICATION_STATUS_META).sort()).toEqual([...ALL_STATUSES].sort())
   })
 
@@ -39,7 +44,9 @@ describe('VERIFICATION_STATUS_META', () => {
   it.each(INCONCLUSIVE_STATUSES)('говорит в %s, что вывод делать нельзя', (status) => {
     const meta = VERIFICATION_STATUS_META[status]
 
-    expect(meta.explanation).toMatch(/не установлены|не дала результата|не прошла валидацию/)
+    expect(meta.explanation).toMatch(
+      /не установлены|не дала результата|не прошла валидацию|не начиналась/,
+    )
   })
 
   it('помечает только PROPERTY_HOLDS успехом', () => {
@@ -77,5 +84,36 @@ describe('VERIFICATION_STATUS_META', () => {
 
     expect(meta.tone).toBe('danger')
     expect(meta.headline).toBe('Найдено нарушение')
+  })
+})
+
+describe('verificationMeta', () => {
+  it('называет ошибкой модели нарушение, которое агент сам объяснил ошибкой', () => {
+    const meta = verificationMeta({
+      status: VERIFICATION_STATUSES.propertyViolated,
+      root_cause: ROOT_CAUSES.agentError,
+    })
+
+    expect(meta).toBe(AGENT_MISREAD_META)
+    expect(meta.headline).toBe('Модель ошибочна')
+    expect(meta.tone).toBe('danger')
+  })
+
+  it('оставляет обычный заголовок, если причина — требование', () => {
+    const meta = verificationMeta({
+      status: VERIFICATION_STATUSES.propertyViolated,
+      root_cause: ROOT_CAUSES.requirementError,
+    })
+
+    expect(meta.headline).toBe('Найдено нарушение')
+  })
+
+  it('не подменяет заголовок успешной проверки', () => {
+    const meta = verificationMeta({
+      status: VERIFICATION_STATUSES.propertyHolds,
+      root_cause: null,
+    })
+
+    expect(meta.headline).toBe('Нарушений не найдено')
   })
 })

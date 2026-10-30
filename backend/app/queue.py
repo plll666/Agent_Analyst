@@ -11,6 +11,7 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 CHECK_BEHAVIOR = "check_behavior"
+RUN_ANALYSIS = "run_analysis"
 
 _pool: ArqRedis | None = None
 
@@ -31,8 +32,28 @@ async def close_queue() -> None:
 
 
 async def enqueue_check(verification_id: str, **kwargs: Any) -> None:
-    """Поставить прогон в очередь по его идентификатору."""
+    """Поставить прогон в очередь по его идентификатору.
+
+    ``job_id`` равен идентификатору прогона: повторная постановка не создаст
+    дубль задачи, поэтому потерянный воркером прогон можно перевставить.
+    """
     if _pool is None:
         raise RuntimeError("очередь не открыта: open_queue() не вызван")
-    await _pool.enqueue_job(CHECK_BEHAVIOR, verification_id, **kwargs)
-    logger.info("прогон %s поставлен в очередь", verification_id)
+    job = await _pool.enqueue_job(
+        CHECK_BEHAVIOR, verification_id, _job_id=verification_id, **kwargs
+    )
+    if job is not None:
+        logger.info("прогон %s поставлен в очередь", verification_id)
+
+
+async def enqueue_analysis(verification_id: str, **kwargs: Any) -> None:
+    """Поставить итерацию агента в очередь по идентификатору прогона.
+
+    ``job_id`` равен идентификатору прогона: повторная постановка не создаст
+    дубль задачи, поэтому потерянный воркером прогон можно перевставить.
+    """
+    if _pool is None:
+        raise RuntimeError("очередь не открыта: open_queue() не вызван")
+    job = await _pool.enqueue_job(RUN_ANALYSIS, verification_id, _job_id=verification_id, **kwargs)
+    if job is not None:
+        logger.info("итерация агента по прогону %s поставлена в очередь", verification_id)

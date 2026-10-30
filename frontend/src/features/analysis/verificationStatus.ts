@@ -1,5 +1,5 @@
-import { VERIFICATION_STATUSES } from '../../types/api'
-import type { PropertyType, VerificationStatus } from '../../types/api'
+import { ROOT_CAUSES, VERIFICATION_STATUSES } from '../../types/api'
+import type { PropertyType, Verification, VerificationStatus } from '../../types/api'
 
 export type StatusTone = 'neutral' | 'bone' | 'success' | 'danger'
 
@@ -68,6 +68,40 @@ export const VERIFICATION_STATUS_META: Record<VerificationStatus, VerificationSt
     tone: 'danger',
     isPending: false,
   },
+  [VERIFICATION_STATUSES.agentError]: {
+    headline: 'Агент не построил модель',
+    explanation:
+      'Агент не смог превратить требование в проверяемую модель, поэтому проверка не начиналась и вывод делать нельзя. Текст требования стоит переформулировать или дополнить.',
+    shortLabel: 'Агент',
+    tone: 'danger',
+    isPending: false,
+  },
+}
+
+/**
+ * Особый исход: движок нашёл нарушение, но объяснение признало, что виновата
+ * сама модель. Это не вывод о требовании, поэтому и заголовок другой.
+ */
+export const AGENT_MISREAD_META: VerificationStatusMeta = {
+  headline: 'Модель ошибочна',
+  explanation:
+    'Контрпример относится к ошибке модели, а не к требованию: агент сам признал, что формула свойства не соответствует тексту. Это не вывод о системе — проверка недействительна, модель нужно перестроить.',
+  shortLabel: 'Ошибка модели',
+  tone: 'danger',
+  isPending: false,
+}
+
+export function verificationMeta(
+  verification: Pick<Verification, 'status' | 'root_cause'>,
+): VerificationStatusMeta {
+  if (
+    verification.status === VERIFICATION_STATUSES.propertyViolated &&
+    verification.root_cause === ROOT_CAUSES.agentError
+  ) {
+    return AGENT_MISREAD_META
+  }
+
+  return VERIFICATION_STATUS_META[verification.status]
 }
 
 export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {

@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from app.domain.verification import Statistics, VerificationResult, VerificationStatus
 
 FAILURE_PRECEDENCE: tuple[VerificationStatus, ...] = (
+    VerificationStatus.AGENT_ERROR,
     VerificationStatus.MODEL_INVALID,
     VerificationStatus.TIMEOUT,
     VerificationStatus.STATE_LIMIT_REACHED,

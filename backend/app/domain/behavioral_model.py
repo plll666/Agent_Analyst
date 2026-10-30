@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -335,3 +337,19 @@ def _expression_errors(
         case EqExpr():
             return _comparison_errors(expr, variables, where)
     return []
+
+
+def schema_hash(document: Mapping[str, Any]) -> str:
+    """Посчитать хэш документа модели.
+
+    Каноническая форма (сортировка ключей, без пробелов) нужна, чтобы хэш
+    отличал реальное изменение модели от смены промпта и порядка ключей.
+
+    Args:
+        document: Документ модели в JSON-виде.
+
+    Returns:
+        SHA-256 в hex.
+    """
+    canonical = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

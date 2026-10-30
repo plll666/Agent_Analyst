@@ -120,3 +120,10 @@ def test_rejects_an_empty_run() -> None:
     """Пустой набор — не «всё хорошо», а отсутствие проверки."""
     with pytest.raises(ValueError, match="ни одно свойство не проверено"):
         combine([])
+
+
+def test_agent_error_is_never_reported_as_holds() -> None:
+    """Агент не построил модель — проверено ничего, успеха быть не может."""
+    combined = combine([_holds("P1"), _failure(Status.AGENT_ERROR, "P2")])
+
+    assert combined.status is Status.AGENT_ERROR

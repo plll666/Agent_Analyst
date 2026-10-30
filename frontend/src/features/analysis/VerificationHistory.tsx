@@ -60,7 +60,7 @@ export function VerificationHistory({
         ref={rootRef}
         className="flex max-h-[26rem] min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2"
       >
-        {verifications.map((verification) => {
+        {verifications.map((verification, index) => {
           const isSelected = verification.id === selectedId
 
           return (
@@ -78,15 +78,19 @@ export function VerificationHistory({
                 )}
               >
                 <span className="flex items-center justify-between gap-2">
-                  <VerificationStatusBadge status={verification.status} />
+                  <VerificationStatusBadge
+                    status={verification.status}
+                    rootCause={verification.root_cause}
+                  />
                   {verification.property_id !== null ? (
                     <span className="font-mono text-micro text-subtle">
                       {verification.property_id}
                     </span>
                   ) : null}
                 </span>
-                <span className="text-xs text-subtle">
-                  {formatDateTime(verification.created_at)}
+                <span className="flex items-center justify-between gap-2 text-xs text-subtle">
+                  <span>{formatDateTime(verification.created_at)}</span>
+                  <span className="text-micro">итерация {verifications.length - index}</span>
                 </span>
               </button>
             </li>

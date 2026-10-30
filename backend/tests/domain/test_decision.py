@@ -1,0 +1,51 @@
+"""Правило «Stop / Ask Rule»: спросить пользователя или остановиться."""
+
+import pytest
+
+from app.domain.decision import AnalysisDecision, decide
+from app.domain.verification import RootCause, VerificationStatus
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        VerificationStatus.PROPERTY_HOLDS,
+        VerificationStatus.MODEL_INVALID,
+        VerificationStatus.TIMEOUT,
+        VerificationStatus.STATE_LIMIT_REACHED,
+        VerificationStatus.ENGINE_ERROR,
+        VerificationStatus.AGENT_ERROR,
+    ],
+)
+def test_stops_when_there_is_nothing_to_ask(status: VerificationStatus) -> None:
+    """Уточнять нечего — цикл заканчивается с честным результатом."""
+    assert decide(status) is AnalysisDecision.STOP
+
+
+def test_asks_after_violation() -> None:
+    """При нарушении у пользователя есть что уточнить."""
+    assert decide(VerificationStatus.PROPERTY_VIOLATED) is AnalysisDecision.ASK
+
+
+@pytest.mark.parametrize(
+    "root_cause",
+    [RootCause.REQUIREMENT_ERROR, RootCause.MISSING_RULE, None],
+)
+def test_asks_when_the_question_is_about_the_requirement(
+    root_cause: RootCause | None,
+) -> None:
+    """Нарушение требования или пробел в нём — повод спросить пользователя."""
+    assert decide(VerificationStatus.PROPERTY_VIOLATED, root_cause) is AnalysisDecision.ASK
+
+
+def test_stops_when_the_agent_admits_its_own_error() -> None:
+    """Ошибку модели агент исправляет сам, а не перекладывает на пользователя."""
+    assert (
+        decide(VerificationStatus.PROPERTY_VIOLATED, RootCause.AGENT_ERROR) is AnalysisDecision.STOP
+    )
+
+
+def test_pending_run_has_no_decision_yet() -> None:
+    """Идущий прогон не решён: решение принимается по терминальному статусу."""
+    with pytest.raises(ValueError, match="терминальному статусу"):
+        decide(VerificationStatus.PENDING)

@@ -7,6 +7,7 @@ from app.domain.behavioral_model import (
 )
 from app.domain.expressions import AndExpr, Effect, EqExpr, InExpr, VarExpr
 from app.domain.verification import (
+    RootCause,
     Verification,
     VerificationExplanation,
     VerificationResult,
@@ -460,3 +461,18 @@ def test_contract_model_fixed_differs_only_by_declared_variable() -> None:
 
     assert "cancelled" in [item["name"] for item in CONTRACT_MODEL_FIXED["variables"]]
     assert verbatim["initial"]["cancelled"] is False
+
+
+def test_verification_accepts_root_cause_on_violation() -> None:
+    verification = Verification(
+        result=VerificationResult.model_validate(contract_result()),
+        explanation=VerificationExplanation(
+            business_summary="сценарий",
+            hypothesis="гипотеза",
+            question="вопрос",
+            root_cause=RootCause.MISSING_RULE,
+        ),
+    )
+
+    assert verification.explanation.root_cause is RootCause.MISSING_RULE
+    assert verification.model_dump(mode="json")["root_cause"] == "MISSING_RULE"
