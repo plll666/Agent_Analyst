@@ -112,6 +112,7 @@ class Verification(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
     model_version_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("model_versions.id"))
+    requirement_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("requirements.id"))
     status: Mapped[str] = mapped_column(String(32))
     property_id: Mapped[str | None] = mapped_column(String(32))
     engine: Mapped[str] = mapped_column(String(32))
@@ -125,6 +126,7 @@ class Verification(Base):
     hypothesis: Mapped[str | None] = mapped_column(Text)
     question: Mapped[str | None] = mapped_column(Text)
     root_cause: Mapped[str | None] = mapped_column(String(32))
+    reasoning: Mapped[bool | None] = mapped_column(Boolean)
     model_auto_edited: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -142,6 +144,7 @@ class Verification(Base):
         ),
         Index("ix_verifications_project_created", "project_id", text("created_at DESC")),
         Index("ix_verifications_model_version_id", "model_version_id"),
+        Index("ix_verifications_requirement_id", "requirement_id"),
         Index("ix_verifications_project_property", "project_id", "property_id"),
     )
 

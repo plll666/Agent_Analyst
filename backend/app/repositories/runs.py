@@ -144,18 +144,26 @@ async def create_pending_verification(
     project_id: uuid.UUID,
     model_version_id: uuid.UUID | None,
     engine: str,
+    requirement_id: uuid.UUID | None = None,
+    reasoning: bool | None = None,
 ) -> Verification:
     """Завести прогон в статусе ``PENDING``; ``business_summary`` пока пуст.
 
     ``model_version_id`` может быть пустым: в агентном цикле прогон заводится до
     того, как модель построена, — её строит агент внутри задачи.
+
+    ``requirement_id`` — выбранный на момент запуска текст. Прогон хранит его
+    сам: иначе воркер читал бы «текущую» версию проекта, и вход поставленной
+    задачи менялся бы от того, что пользователь сохранит, пока задача ждёт.
     """
     record = Verification(
         id=uuid.uuid4(),
         project_id=project_id,
         model_version_id=model_version_id,
+        requirement_id=requirement_id,
         status="PENDING",
         engine=engine,
+        reasoning=reasoning,
         business_summary="",
         created_at=datetime.now().astimezone(),
     )
