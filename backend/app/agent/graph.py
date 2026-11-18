@@ -29,9 +29,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import lru_cache, partial
 from typing import Any, TypedDict, cast
 
@@ -45,6 +48,7 @@ from app.agent.modeler import build_model
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.decision import AnalysisDecision, decide
 from app.domain.explanation import summary_for
+from app.domain.stages import Stage, StageState
 from app.domain.verdict import combine
 from app.domain.verification import (
     RootCause,
@@ -59,6 +63,12 @@ CheckProperty = Callable[[BehavioralModel, Property], Awaitable[VerificationResu
 ModelHandler = Callable[[BehavioralModel], Awaitable[None]]
 
 ENGINE_WHEN_AGENT_FAILED = "AGENT"
+
+# Лимит перестроений по умолчанию и версия логики DAG: обе константы входят в
+# ключ входа прогона (контракт спринта 3, раздел 3.1) — меняются только вместе
+# с поведением графа.
+MAX_REBUILDS = 2
+AGENT_LOGIC_VERSION = "agent-dag-1"
 
 # Ключи маршрутов: их возвращают узлы, по ним идут условные рёбра.
 ROUTE_TO_GATE = "gate"
@@ -80,7 +90,7 @@ class CycleLimits:
     """
 
     build_attempts: int = 3
-    max_rebuilds: int = 2
+    max_rebuilds: int = MAX_REBUILDS
     explanation_attempts: int = 3
 
 
@@ -124,6 +134,7 @@ class CycleState(TypedDict, total=False):
     limits: CycleLimits
     on_model: ModelHandler | None
     reasoning: bool | None
+    emit_stage: Callable[[Stage], Awaitable[None]] | None
 
     # Ход выполнения
     model: BehavioralModel | None
@@ -145,6 +156,7 @@ async def run_iteration(
     limits: CycleLimits | None = None,
     on_model: ModelHandler | None = None,
     reasoning: bool | None = None,
+    emit_stage: Callable[[Stage], Awaitable[None]] | None = None,
 ) -> Iteration:
     """Провести одну итерацию агента по графу.
 
@@ -157,6 +169,7 @@ async def run_iteration(
             показывают пользователю, пока идёт проверка.
         reasoning: Рассуждать ли модели до ответа; ``None`` — поведение
             провайдера по умолчанию.
+        emit_stage: Асинхронный получатель снимков этапов графа.
 
     Returns:
         Итог итерации.
@@ -169,6 +182,7 @@ async def run_iteration(
         "limits": bounds,
         "on_model": on_model,
         "reasoning": reasoning,
+        "emit_stage": emit_stage,
         "problems": [],
         "rebuilds": 0,
     }
@@ -207,10 +221,27 @@ def _compiled(max_rebuilds: int) -> Any:
     last = max_rebuilds
 
     for attempt in range(max_rebuilds + 1):
-        builder.add_node(f"build_{attempt}", _build)
-        builder.add_node(f"gate_{attempt}", partial(_gate, attempt=attempt))
-        builder.add_node(f"check_{attempt}", _check)
-        builder.add_node(f"explain_{attempt}", partial(_explain_node, attempt=attempt))
+        builder.add_node(
+            f"build_{attempt}", partial(_observe, name="build", attempt=attempt, handler=_build)
+        )
+        builder.add_node(
+            f"gate_{attempt}",
+            partial(
+                _observe, name="gate", attempt=attempt, handler=partial(_gate, attempt=attempt)
+            ),
+        )
+        builder.add_node(
+            f"check_{attempt}", partial(_observe, name="check", attempt=attempt, handler=_check)
+        )
+        builder.add_node(
+            f"explain_{attempt}",
+            partial(
+                _observe,
+                name="explain",
+                attempt=attempt,
+                handler=partial(_explain_node, attempt=attempt),
+            ),
+        )
 
         builder.add_conditional_edges(
             f"build_{attempt}",
@@ -244,6 +275,56 @@ def _compiled(max_rebuilds: int) -> Any:
     builder.add_edge("fail", END)
 
     return builder.compile()
+
+
+async def _observe(state: CycleState, *, name: str, attempt: int, handler: Any) -> dict[str, Any]:
+    emit = state.get("emit_stage")
+    if emit is None:
+        return await handler(state)
+    started = datetime.now(UTC)
+    stage = Stage(
+        stage_id=str(uuid.uuid4()),
+        scope="agent",
+        name=name,
+        state=StageState.RUNNING,
+        build_index=attempt,
+        attempt=1,
+        started_at=started,
+    )
+    await emit(stage)
+    try:
+        result = await handler(state)
+    except BaseException as error:
+        finished = datetime.now(UTC)
+        await emit(
+            stage.model_copy(
+                update={
+                    "state": StageState.CANCELLED
+                    if isinstance(error, asyncio.CancelledError)
+                    else StageState.FAILED,
+                    "finished_at": finished,
+                    "duration_ms": max(0, int((finished - started).total_seconds() * 1000)),
+                    "reason_code": "CANCEL_REQUESTED"
+                    if isinstance(error, asyncio.CancelledError)
+                    else "STAGE_FAILED",
+                }
+            )
+        )
+        raise
+    finished = datetime.now(UTC)
+    await emit(
+        stage.model_copy(
+            update={
+                "state": StageState.SUCCEEDED,
+                "finished_at": finished,
+                "duration_ms": max(0, int((finished - started).total_seconds() * 1000)),
+                "reason_code": ("GATE_REJECTED" if name == "gate" else "MODEL_INTERPRETATION_ERROR")
+                if result.get("route") == ROUTE_TO_REBUILD
+                else None,
+            }
+        )
+    )
+    return result
 
 
 def _route(state: CycleState) -> str:

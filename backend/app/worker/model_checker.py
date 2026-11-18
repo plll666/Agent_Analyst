@@ -20,6 +20,7 @@ import signal
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC
 from pathlib import Path
 
 from app.domain.behavioral_model import BehavioralModel, Property
@@ -60,6 +61,9 @@ class EngineSettings:
     state_limit: int
     workers: str
     work_dir: Path
+    # Идентификатор версии TLC: входит в ключ входа прогона. Фактическая
+    # версия читается из вывода при запуске, а для ключа нужна конфигурационная.
+    version: str = "tla2tools"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> EngineSettings:
@@ -82,6 +86,7 @@ class EngineSettings:
             state_limit=int(source.get("STATE_LIMIT", "1000000")),
             workers=source.get("TLC_WORKERS", "auto"),
             work_dir=Path(source.get("TLA_WORK_DIR", tempfile.gettempdir())),
+            version=source.get("TLC_VERSION", "tla2tools").strip() or "tla2tools",
         )
 
 
@@ -128,27 +133,138 @@ class ModelChecker:
     def settings(self) -> EngineSettings:
         return self._settings
 
-    async def check(self, model: BehavioralModel, prop: Property) -> CheckOutcome:
+    async def check(self, model: BehavioralModel, prop: Property, emit_stage=None) -> CheckOutcome:
         """Скомпилировать модель и прогнать TLC по одному свойству.
 
         Args:
             model: Доменная модель прогона.
             prop: Проверяемое свойство.
+            emit_stage: Асинхронный получатель этапов ядра.
 
         Returns:
             Результат проверки вместе со спецификацией, конфигурацией и выводом
             движка: по ним прогон воспроизводится вручную. Ни один сбой не
             поднимается наружу — он отражён в статусе результата.
         """
-        spec = compile_model(model, prop)
+
+        async def record(
+            name: str,
+            state: str,
+            stage_id: str,
+            started,
+            reason: str | None = None,
+            statistics=None,
+        ):
+            if emit_stage is None:
+                return
+            from datetime import datetime
+
+            from app.domain.stages import Stage
+
+            finished = datetime.now(UTC) if state != "RUNNING" else None
+            await emit_stage(
+                Stage(
+                    stage_id=stage_id,
+                    scope="core",
+                    name=name,
+                    state=state,
+                    property_id=prop.id,
+                    started_at=started,
+                    finished_at=finished,
+                    duration_ms=max(0, int((finished - started).total_seconds() * 1000))
+                    if finished
+                    else None,
+                    reason_code=reason,
+                    statistics=statistics,
+                )
+            )
+
+        import uuid
+        from datetime import datetime
+
+        last_stage = {}
+
+        async def step(name: str, operation, failure=None):
+            stage_id = str(uuid.uuid4())
+            started = datetime.now(UTC)
+            last_stage[name] = (stage_id, started)
+            await record(name, "RUNNING", stage_id, started)
+            try:
+                result = await operation()
+            except BaseException as error:
+                await record(
+                    name,
+                    "CANCELLED" if isinstance(error, asyncio.CancelledError) else "FAILED",
+                    stage_id,
+                    started,
+                    "CANCEL_REQUESTED"
+                    if isinstance(error, asyncio.CancelledError)
+                    else "STAGE_FAILED",
+                )
+                raise
+            reason = failure(result) if failure is not None else None
+            await record(name, "FAILED" if reason else "SUCCEEDED", stage_id, started, reason)
+            return result
+
+        async def compile_spec():
+            return compile_model(model, prop)
+
+        async def validated():
+            return model
+
+        await step("validate", validated)
+        spec = await step("compile_tla", compile_spec)
         work_dir = Path(tempfile.mkdtemp(prefix="tlc-", dir=self._settings.work_dir))
         try:
             files = _materialize(spec, work_dir)
-            invalid = await self._check_syntax(files.tla, prop)
+            invalid = await step(
+                "sany_check",
+                lambda: self._check_syntax(files.tla, prop),
+                lambda value: str(value.status) if value is not None else None,
+            )
             if invalid is not None:
                 return CheckOutcome(result=invalid, spec=spec, output="")
-            result, output = await self._explore(files, model, prop, spec)
-            return CheckOutcome(result=result, spec=spec, output=output)
+            execution = await step(
+                "tlc_run",
+                lambda: self._execute(self._tlc_command(files)),
+                lambda value: (
+                    "TIMEOUT"
+                    if value.timed_out
+                    else "STATE_LIMIT_REACHED"
+                    if value.states_limit is not None
+                    else None
+                ),
+            )
+
+            async def parse():
+                return self._classify(execution, model, prop, spec)
+
+            result = await step(
+                "parse_result",
+                parse,
+                lambda value: (
+                    str(value.status)
+                    if value.status
+                    in {VerificationStatus.ENGINE_ERROR, VerificationStatus.MODEL_INVALID}
+                    else None
+                ),
+            )
+            if result.statistics is not None:
+                stage_id, started = last_stage["tlc_run"]
+                failed = execution.timed_out or execution.states_limit is not None
+                await record(
+                    "tlc_run",
+                    "FAILED" if failed else "SUCCEEDED",
+                    stage_id,
+                    started,
+                    "TIMEOUT"
+                    if execution.timed_out
+                    else "STATE_LIMIT_REACHED"
+                    if execution.states_limit is not None
+                    else None,
+                    result.statistics,
+                )
+            return CheckOutcome(result=result, spec=spec, output=execution.output)
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
