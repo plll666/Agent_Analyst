@@ -39,7 +39,10 @@ from app.agent.explainer import explain_result
 from app.agent.llm import LLMClient, LLMError, LLMSettings, client_from_env
 from app.agent.orchestrator import (
     ENGINE_WHEN_AGENT_FAILED,
+    AgentEvent,
     CycleLimits,
+    StageEmitter,
+    generation_profile,
     run_iteration,
 )
 from app.database.models import Verification
@@ -186,7 +189,15 @@ async def _run_agent_iteration(
     # и последняя версия артефактов должна заменить предыдущую, а не задвоиться.
     artifacts: dict[str, StoredArtifact] = {}
 
-    async def check_property(model: BehavioralModel, prop: Property) -> VerificationResult:
+    async def check_property(
+        model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
+    ) -> VerificationResult:
+        """Проверить свойство движком и сохранить артефакты прогона.
+
+        ``emit_stage`` принимается для совместимости с интерфейсом агента:
+        этапы ядра (validate, TLC, разбор) — отдельная задача backend (Б10).
+        """
+        _ = emit_stage
         outcome = await checker.check(model, prop)
         for stored in store.save_run(
             str(context.verification_id),
@@ -208,18 +219,42 @@ async def _run_agent_iteration(
         await attach_model_version(sessionmaker, context.verification_id, version_id)
         context = replace(context, model_version_id=version_id)
 
+    async def emit_stage(event: AgentEvent) -> None:
+        """Связать событие этапа с прогоном и записать в журнал воркера.
+
+        Долговременное хранение и доставка через SSE — задачи backend (Б4/Б5);
+        здесь событие получает идентичность прогона, без которой его нельзя
+        сопоставить с записью в БД.
+        """
+        logger.info(
+            "прогон %s: событие этапа %s",
+            context.verification_id,
+            event.model_dump_json(),
+        )
+
     settings = LLMSettings.from_env()
+    limits = CycleLimits(
+        build_attempts=settings.max_attempts,
+        max_rebuilds=MAX_REBUILDS,
+        explanation_attempts=settings.max_attempts,
+    )
+    generation = generation_profile(
+        settings,
+        build_attempts=limits.build_attempts,
+        max_rebuilds=limits.max_rebuilds,
+        explanation_attempts=limits.explanation_attempts,
+        reasoning=reasoning,
+    )
+    logger.info("прогон %s: профиль генерации %s", identifier, generation.fingerprint())
     iteration = await run_iteration(
         client=client,
         requirement_text=context.requirement_text,
         check_property=check_property,
-        limits=CycleLimits(
-            build_attempts=settings.max_attempts,
-            max_rebuilds=MAX_REBUILDS,
-            explanation_attempts=settings.max_attempts,
-        ),
+        limits=limits,
         on_model=on_model,
         reasoning=reasoning,
+        emit_stage=emit_stage,
+        generation=generation,
     )
 
     if artifacts:

@@ -73,7 +73,12 @@ async def explain_result(
         ),
         prompt_version=EXPLANATION_PROMPT_VERSION,
         attempts=attempts,
-        context={"requirement_text": requirement_text, "steps": _trace_steps(result)},
+        context={
+            "requirement_text": requirement_text,
+            "steps": _trace_steps(result),
+            "transition_names": [transition.name for transition in model.transitions],
+            "trace_transitions": _trace_transitions(result),
+        },
         reasoning=reasoning,
     )
     explanation, related = wire.to_explanation()
@@ -92,3 +97,14 @@ def _trace_json(result: VerificationResult) -> str:
 def _trace_steps(result: VerificationResult) -> int:
     """Сколько шагов в трассе: по одному предложению сценария на шаг."""
     return len(result.counterexample.steps) if result.counterexample is not None else 0
+
+
+def _trace_transitions(result: VerificationResult) -> list[str]:
+    """Переходы, которые действительно есть в трассе.
+
+    Список уходит в проверку ответа: событие, названное агентом, но
+    отсутствующее в трассе, — такая же выдумка, как лишний шаг.
+    """
+    if result.counterexample is None:
+        return []
+    return [step.transition for step in result.counterexample.steps if step.transition is not None]

@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -25,6 +25,12 @@ from app.domain.verification import CounterexampleStep
 VariableType = Literal["enum", "boolean", "integer"]
 
 PropertyType = Literal["invariant", "forbidden_state", "reachable", "deadlock_free"]
+
+SCHEMA_VERSION: Final = 1
+"""Версия схемы ``BehavioralModel``: входит в ключ повторного использования.
+
+Меняется, когда меняется набор полей документа или их смысл, — не при правке
+промпта или текста ошибок валидации."""
 
 EXPRESSION_REQUIRED_TYPES = frozenset({"invariant", "forbidden_state", "reachable"})
 

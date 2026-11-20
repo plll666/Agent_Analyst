@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, model_validator
@@ -31,6 +32,12 @@ from app.domain.verification import (
 )
 
 WireScalar = str | bool | int
+
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+_TECHNICAL_WORDS = frozenset({"tlc", "tla", "sany", "invariant", "deadlock"})
+
+_TECHNICAL_SNIPPETS = ("tla+", "инвариант", "дедлок")
 
 
 class WireBase(BaseModel):
@@ -205,6 +212,8 @@ class WireExplanation(WireBase):
                 f"в scenario {len(self.scenario)} предложений, а в трассе {steps} шагов: "
                 "опиши ровно по одному предложению на шаг"
             )
+        self._check_trace_events(context)
+        self._check_business_language()
         requirement_text = context.get("requirement_text")
         if isinstance(requirement_text, str):
             for item in self.related_requirements:
@@ -219,6 +228,39 @@ class WireExplanation(WireBase):
                         "и не менее двух слов"
                     )
         return self
+
+    def _check_trace_events(self, context: dict[str, Any]) -> None:
+        """Событие, названное в сценарии, должно быть в трассе.
+
+        Сценарий описывает шаги контрпримера, поэтому переход модели, которого
+        в трассе нет, — выдуманное событие. Гипотеза может ссылаться на события
+        модели вне трассы: это рассуждение о модели, а не пересказ шага.
+        """
+        names = context.get("transition_names")
+        trace = context.get("trace_transitions")
+        if not isinstance(names, list) or not isinstance(trace, list):
+            return
+        known = {str(name) for name in names}
+        in_trace = {str(name).lower() for name in trace}
+        for index, sentence in enumerate(self.scenario):
+            for token in _IDENTIFIER.findall(sentence):
+                if token in known and token.lower() not in in_trace:
+                    raise ValueError(
+                        f"scenario[{index}] упоминает переход {token!r}, которого нет в трассе: "
+                        "называй только события из трассы и не придумывай новых"
+                    )
+
+    def _check_business_language(self) -> None:
+        """Объяснение должно быть понятно без знания TLA+ и моделчекера."""
+        texts = [("hypothesis", self.hypothesis), ("question", self.question)]
+        texts.extend(("scenario", sentence) for sentence in self.scenario)
+        for label, text in texts:
+            term = _technical_term(text)
+            if term is not None:
+                raise ValueError(
+                    f"{label} содержит технический термин {term!r}: объясняй на языке "
+                    "бизнеса, без TLA+, TLC, SANY и инвариантов"
+                )
 
     def to_explanation(self) -> tuple[VerificationExplanation, tuple[RelatedRequirement, ...]]:
         """Превратить ответ в доменное объяснение и ссылки на текст.
@@ -249,3 +291,20 @@ class WireExplanation(WireBase):
                 raise ValueError("related_requirements[].quote пуст")
             related.append(RelatedRequirement(paragraph_ref=item.paragraph_ref, quote=quote))
         return explanation, tuple(related)
+
+
+def _technical_term(text: str) -> str | None:
+    """Найти термин моделчекера, непонятный без TLA+.
+
+    Проверяются отдельные латинские слова и характерные обрывки: подстрочный
+    поиск по всему тексту ловил бы «tla» внутри других слов.
+    """
+    lowered = text.lower()
+    for snippet in _TECHNICAL_SNIPPETS:
+        if snippet in lowered:
+            return snippet
+    tokens: list[str] = _IDENTIFIER.findall(text)
+    for token in tokens:
+        if token.lower() in _TECHNICAL_WORDS:
+            return token
+    return None
