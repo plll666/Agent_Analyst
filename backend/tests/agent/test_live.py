@@ -15,7 +15,13 @@ from pathlib import Path
 import pytest
 
 from app.agent.llm import LLMClient, LLMSettings, client_from_env
-from app.agent.orchestrator import Iteration, run_iteration
+from app.agent.orchestrator import (
+    CycleLimits,
+    Iteration,
+    StageEmitter,
+    generation_profile,
+    run_iteration,
+)
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.verification import VerificationResult, VerificationStatus
 from app.worker.model_checker import EngineSettings, ModelChecker
@@ -35,14 +41,31 @@ pytestmark = [pytest.mark.agent, pytest.mark.integration]
 async def _iterate(client: LLMClient, checker: ModelChecker, requirement_text: str) -> Iteration:
     """Провести итерацию цикла с настоящим движком TLC."""
 
-    async def check_property(model: BehavioralModel, prop: Property) -> VerificationResult:
+    async def check_property(
+        model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
+    ) -> VerificationResult:
+        _ = emit_stage
         outcome = await checker.check(model, prop)
         return outcome.result
 
+    limits = CycleLimits(
+        build_attempts=SETTINGS.max_attempts,
+        max_rebuilds=2,
+        explanation_attempts=SETTINGS.max_attempts,
+    )
+    profile = generation_profile(
+        SETTINGS,
+        build_attempts=limits.build_attempts,
+        max_rebuilds=limits.max_rebuilds,
+        explanation_attempts=limits.explanation_attempts,
+        reasoning=None,
+    )
     return await run_iteration(
         client=client,
         requirement_text=requirement_text,
         check_property=check_property,
+        limits=limits,
+        generation=profile,
     )
 
 
@@ -92,6 +115,11 @@ async def test_case_text_reproduces_the_hole_and_gets_an_explanation(
         )
         assert second.explanation.question is None, (
             "цикл не сошёлся: агент снова спрашивает пользователя вместо остановки"
+        )
+        assert first.generation is not None
+        assert second.generation is not None
+        assert first.generation.fingerprint() == second.generation.fingerprint(), (
+            "профиль генерации изменился между итерациями с одинаковыми настройками"
         )
     finally:
         await client.aclose()

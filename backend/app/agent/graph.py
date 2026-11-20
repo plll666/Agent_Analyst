@@ -24,7 +24,9 @@
 
 Модуль ничего не знает про БД и очередь: на входе текст требования, клиент LLM
 и способ проверить одно свойство; на выходе — результат, объяснение и решение.
-Запись в базу делает вызывающая сторона.
+Запись в базу делает вызывающая сторона. Ход выполнения агент сообщает через
+необязательный callback ``emit_stage``: этапы ``build``/``gate``/``check``/
+``explain`` и факты перестроения. Куда эти события попадают, решает воркер.
 """
 
 from __future__ import annotations
@@ -33,15 +35,25 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import lru_cache, partial
-from typing import Any, TypedDict, cast
+from typing import Any, Protocol, TypedDict, cast
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 
 from app.agent import self_check
 from app.agent.explainer import explain_result
+from app.agent.generation import GenerationProfile
 from app.agent.llm import LLMClient, LLMError, LLMResponseError
 from app.agent.modeler import build_model
+from app.agent.stages import (
+    REASON_CHECK_FAILED,
+    REASON_GATE_REJECTED,
+    REASON_INVALID_RESPONSE,
+    REASON_LLM_UNAVAILABLE,
+    REASON_MODEL_INTERPRETATION_ERROR,
+    StageEmitter,
+    StageReporter,
+)
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.decision import AnalysisDecision, decide
 from app.domain.explanation import summary_for
@@ -55,8 +67,29 @@ from app.domain.verification import (
 
 logger = logging.getLogger(__name__)
 
-CheckProperty = Callable[[BehavioralModel, Property], Awaitable[VerificationResult]]
+
+class CheckProperty(Protocol):
+    """Как проверить одно свойство модели детерминированным движком.
+
+    ``emit_stage`` — тот же callback, что получает агент: адаптер ядра
+    передаёт через него вложенные этапы проверки (``validate``, ``tlc_run`` и
+    остальные), а граф подставляет им родительский ``agent/check``.
+    """
+
+    async def __call__(
+        self,
+        model: BehavioralModel,
+        prop: Property,
+        *,
+        emit_stage: StageEmitter | None = None,
+    ) -> VerificationResult:
+        """Проверить одно свойство и вернуть результат."""
+        ...
+
+
 ModelHandler = Callable[[BehavioralModel], Awaitable[None]]
+
+_STAGE_MESSAGE_LIMIT = 240
 
 ENGINE_WHEN_AGENT_FAILED = "AGENT"
 
@@ -97,6 +130,7 @@ class Iteration:
         gate_problems: Замечания ворот или объяснения, из-за которых модель
             перестраивалась.
         rebuilds: Сколько раз модель перестраивалась.
+        generation: Профиль генерации прогона, если он передан вызывающей стороной.
     """
 
     status: VerificationStatus
@@ -106,6 +140,7 @@ class Iteration:
     decision: AnalysisDecision
     gate_problems: tuple[str, ...] = ()
     rebuilds: int = 0
+    generation: GenerationProfile | None = None
 
 
 class CycleState(TypedDict, total=False):
@@ -124,6 +159,8 @@ class CycleState(TypedDict, total=False):
     limits: CycleLimits
     on_model: ModelHandler | None
     reasoning: bool | None
+    emit_stage: StageEmitter | None
+    generation: GenerationProfile | None
 
     # Ход выполнения
     model: BehavioralModel | None
@@ -145,6 +182,8 @@ async def run_iteration(
     limits: CycleLimits | None = None,
     on_model: ModelHandler | None = None,
     reasoning: bool | None = None,
+    emit_stage: StageEmitter | None = None,
+    generation: GenerationProfile | None = None,
 ) -> Iteration:
     """Провести одну итерацию агента по графу.
 
@@ -157,6 +196,9 @@ async def run_iteration(
             показывают пользователю, пока идёт проверка.
         reasoning: Рассуждать ли модели до ответа; ``None`` — поведение
             провайдера по умолчанию.
+        emit_stage: Куда сообщать события этапов и перестроений; ``None`` —
+            прогон без наблюдаемости.
+        generation: Профиль генерации прогона; возвращается в итоге как есть.
 
     Returns:
         Итог итерации.
@@ -169,6 +211,8 @@ async def run_iteration(
         "limits": bounds,
         "on_model": on_model,
         "reasoning": reasoning,
+        "emit_stage": emit_stage,
+        "generation": generation,
         "problems": [],
         "rebuilds": 0,
     }
@@ -207,9 +251,9 @@ def _compiled(max_rebuilds: int) -> Any:
     last = max_rebuilds
 
     for attempt in range(max_rebuilds + 1):
-        builder.add_node(f"build_{attempt}", _build)
+        builder.add_node(f"build_{attempt}", partial(_build, build_index=attempt))
         builder.add_node(f"gate_{attempt}", partial(_gate, attempt=attempt))
-        builder.add_node(f"check_{attempt}", _check)
+        builder.add_node(f"check_{attempt}", partial(_check, attempt=attempt))
         builder.add_node(f"explain_{attempt}", partial(_explain_node, attempt=attempt))
 
         builder.add_conditional_edges(
@@ -251,7 +295,19 @@ def _route(state: CycleState) -> str:
     return state["route"]
 
 
-async def _build(state: CycleState) -> dict[str, Any]:
+def _reporter(state: CycleState) -> StageReporter:
+    """Репортер событий этого прогона."""
+    return StageReporter(state.get("emit_stage"))
+
+
+def _short(text: str) -> str:
+    """Обрезать длинное пояснение до размера строки статуса."""
+    if len(text) <= _STAGE_MESSAGE_LIMIT:
+        return text
+    return text[: _STAGE_MESSAGE_LIMIT - 1].rstrip() + "…"
+
+
+async def _build(state: CycleState, *, build_index: int) -> dict[str, Any]:
     """Построить модель; и первая сборка, и перестроение получают все попытки.
 
     Одна попытка на перестроение оказалась хрупкой: невалидный структурный
@@ -261,6 +317,10 @@ async def _build(state: CycleState) -> dict[str, Any]:
     """
     limits = state["limits"]
     problems = state.get("problems", [])
+    reporter = _reporter(state)
+    stage_id = await reporter.start(
+        "build", build_index=build_index, message="Агент строит модель по тексту требования"
+    )
     try:
         model = await build_model(
             state["client"],
@@ -270,19 +330,31 @@ async def _build(state: CycleState) -> dict[str, Any]:
             reasoning=state.get("reasoning"),
         )
     except LLMResponseError as error:
-        # Сохраняем нарушения схемы: без них в UI видно только «не ответила»,
-        # а причина (какое поле не то) теряется.
+        detail = _short("; ".join(error.problems) or str(error))
+        await reporter.finish(
+            stage_id,
+            state="FAILED",
+            reason_code=REASON_INVALID_RESPONSE,
+            message=detail,
+        )
         return {
             "model": None,
             "problems": [*problems, *error.problems],
             "route": ROUTE_TO_FAIL,
         }
     except (LLMError, ValidationError) as error:
+        await reporter.finish(
+            stage_id,
+            state="FAILED",
+            reason_code=REASON_LLM_UNAVAILABLE,
+            message=_short(str(error)),
+        )
         return {
             "model": None,
             "problems": [*problems, str(error)],
             "route": ROUTE_TO_FAIL,
         }
+    await reporter.finish(stage_id, state="SUCCEEDED", message="Модель построена")
     return {"model": model, "route": ROUTE_TO_GATE}
 
 
@@ -291,15 +363,26 @@ async def _gate(state: CycleState, *, attempt: int) -> dict[str, Any]:
     model = state["model"]
     if model is None:  # защита от неверной сборки графа, а не рабочий путь
         return {"route": ROUTE_TO_FAIL}
+    reporter = _reporter(state)
+    stage_id = await reporter.start(
+        "gate",
+        build_index=attempt,
+        message="Ворота проверяют, что правила модели подкреплены текстом",
+    )
     gate = self_check.check(model, state["requirement_text"])
     previous = state.get("problems", [])
 
     if not gate:
+        await reporter.finish(stage_id, state="SUCCEEDED", message="Модель прошла ворота")
         handler = state.get("on_model")
         if handler is not None:
             await handler(model)
         return {"route": ROUTE_TO_CHECK}
 
+    message = _short(gate[0])
+    await reporter.finish(
+        stage_id, state="FAILED", reason_code=REASON_GATE_REJECTED, message=message
+    )
     if gate == previous:
         logger.warning("ворота вернули те же замечания второй раз подряд: %s", "; ".join(gate))
         return {"problems": gate, "route": ROUTE_TO_FAIL}
@@ -307,16 +390,56 @@ async def _gate(state: CycleState, *, attempt: int) -> dict[str, Any]:
     rebuilds = attempt + 1
     if attempt >= state["limits"].max_rebuilds:
         return {"problems": gate, "rebuilds": rebuilds, "route": ROUTE_TO_FAIL}
+    await reporter.rebuild(
+        from_build_index=attempt,
+        to_build_index=attempt + 1,
+        reason_code=REASON_GATE_REJECTED,
+        message=message,
+    )
     return {"problems": gate, "rebuilds": rebuilds, "route": ROUTE_TO_REBUILD}
 
 
-async def _check(state: CycleState) -> dict[str, Any]:
+async def _check(state: CycleState, *, attempt: int) -> dict[str, Any]:
     """Проверить все свойства модели детерминированным движком."""
     model = state["model"]
     if model is None:  # недостижимо: до check ведёт только пройденный gate
         raise RuntimeError("граф дошёл до проверки без модели")
-    results = [await state["check_property"](model, prop) for prop in model.properties]
+    results = [
+        await _check_one(state, model, prop, build_index=attempt) for prop in model.properties
+    ]
     return {"result": combine(results)}
+
+
+async def _check_one(
+    state: CycleState, model: BehavioralModel, prop: Property, *, build_index: int
+) -> VerificationResult:
+    """Проверить одно свойство; этап ``check`` становится родителем этапов ядра."""
+    reporter = _reporter(state)
+    stage_id = await reporter.start(
+        "check",
+        build_index=build_index,
+        property_id=prop.id,
+        message=f"Проверка свойства {prop.id}",
+    )
+    try:
+        result = await state["check_property"](
+            model, prop, emit_stage=reporter.child(stage_id) if stage_id else None
+        )
+    except Exception as error:
+        await reporter.finish(
+            stage_id,
+            state="FAILED",
+            reason_code=REASON_CHECK_FAILED,
+            message=_short(f"проверка свойства {prop.id} упала: {error}"),
+        )
+        raise
+    await reporter.finish(
+        stage_id,
+        state="SUCCEEDED",
+        message=_short(f"Свойство {prop.id}: {result.status.value}"),
+        statistics=result.statistics,
+    )
+    return result
 
 
 async def _explain_node(state: CycleState, *, attempt: int) -> dict[str, Any]:
@@ -330,6 +453,12 @@ async def _explain_node(state: CycleState, *, attempt: int) -> dict[str, Any]:
     model = state["model"]
     if model is None:  # недостижимо по той же причине
         raise RuntimeError("граф дошёл до объяснения без модели")
+    reporter = _reporter(state)
+    stage_id = await reporter.start(
+        "explain",
+        build_index=attempt,
+        message="Агент готовит объяснение результата",
+    )
     result, explanation = await _explain(
         state["client"],
         requirement_text=state["requirement_text"],
@@ -340,12 +469,14 @@ async def _explain_node(state: CycleState, *, attempt: int) -> dict[str, Any]:
     )
 
     if not _agent_misread(result, explanation):
+        await _finish_explain_stage(reporter, stage_id, result, explanation)
         return {"result": result, "explanation": explanation, "route": ROUTE_TO_FINISH}
 
     feedback = _semantic_feedback(result, explanation)
     previous = state.get("problems", [])
     if feedback == previous:
         logger.warning("объяснение повторило те же замечания к модели: %s", "; ".join(feedback))
+        await _finish_explain_stage(reporter, stage_id, result, explanation)
         return {
             "result": result,
             "explanation": explanation,
@@ -354,6 +485,7 @@ async def _explain_node(state: CycleState, *, attempt: int) -> dict[str, Any]:
         }
     if attempt >= state["limits"].max_rebuilds:
         logger.warning("объяснение признало ошибку модели, но лимит перестроений исчерпан")
+        await _finish_explain_stage(reporter, stage_id, result, explanation)
         return {
             "result": result,
             "explanation": explanation,
@@ -362,6 +494,13 @@ async def _explain_node(state: CycleState, *, attempt: int) -> dict[str, Any]:
         }
 
     logger.info("объяснение признало ошибку модели, перестраиваю: %s", explanation.hypothesis)
+    await _finish_explain_stage(reporter, stage_id, result, explanation)
+    await reporter.rebuild(
+        from_build_index=attempt,
+        to_build_index=attempt + 1,
+        reason_code=REASON_MODEL_INTERPRETATION_ERROR,
+        message=_short(explanation.hypothesis or feedback[0]),
+    )
     return {
         "result": result,
         "explanation": explanation,
@@ -369,6 +508,33 @@ async def _explain_node(state: CycleState, *, attempt: int) -> dict[str, Any]:
         "rebuilds": attempt + 1,
         "route": ROUTE_TO_REBUILD,
     }
+
+
+async def _finish_explain_stage(
+    reporter: StageReporter,
+    stage_id: str,
+    result: VerificationResult,
+    explanation: VerificationExplanation,
+) -> None:
+    """Закрыть этап объяснения честным исходом.
+
+    Нарушение без гипотезы означает, что объяснение не получилось и остался
+    шаблон: это провал этапа, а не тихий успех.
+    """
+    if result.status is not VerificationStatus.PROPERTY_VIOLATED:
+        await reporter.finish(
+            stage_id, state="SUCCEEDED", message="Объяснение не требуется: нарушений нет"
+        )
+        return
+    if explanation.hypothesis is None:
+        await reporter.finish(
+            stage_id,
+            state="FAILED",
+            reason_code=REASON_LLM_UNAVAILABLE,
+            message="Объяснение не получено, показан шаблонный текст",
+        )
+        return
+    await reporter.finish(stage_id, state="SUCCEEDED", message="Контрпример объяснён")
 
 
 def _agent_misread(result: VerificationResult, explanation: VerificationExplanation) -> bool:
@@ -410,6 +576,7 @@ def _finish(state: CycleState) -> dict[str, Any]:
             decision=decide(result.status, explanation.root_cause),
             gate_problems=tuple(state.get("problems", [])),
             rebuilds=state.get("rebuilds", 0),
+            generation=state.get("generation"),
         )
     }
 
@@ -417,7 +584,11 @@ def _finish(state: CycleState) -> dict[str, Any]:
 def _fail(state: CycleState) -> dict[str, Any]:
     """Завершить итерацию честным ``AGENT_ERROR``."""
     return {
-        "final": _agent_failed(state.get("problems", []), state.get("rebuilds", 0)),
+        "final": _agent_failed(
+            state.get("problems", []),
+            state.get("rebuilds", 0),
+            state.get("generation"),
+        ),
     }
 
 
@@ -454,7 +625,9 @@ async def _explain(
     return enriched, answered.explanation
 
 
-def _agent_failed(problems: list[str], rebuilds: int) -> Iteration:
+def _agent_failed(
+    problems: list[str], rebuilds: int, generation: GenerationProfile | None
+) -> Iteration:
     """Итерация, на которой агент не смог построить пригодную модель."""
     detail = "; ".join(problems) or "агент не вернул пригодную модель"
     result = VerificationResult(
@@ -472,4 +645,5 @@ def _agent_failed(problems: list[str], rebuilds: int) -> Iteration:
         decision=AnalysisDecision.STOP,
         gate_problems=tuple(problems),
         rebuilds=rebuilds,
+        generation=generation,
     )

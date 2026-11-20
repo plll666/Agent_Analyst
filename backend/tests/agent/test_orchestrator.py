@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.agent.orchestrator import CycleLimits, Iteration, run_iteration
+from app.agent.orchestrator import CycleLimits, Iteration, StageEmitter, run_iteration
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.decision import AnalysisDecision
 from app.domain.verification import (
@@ -65,13 +65,19 @@ def _uncited_model() -> dict[str, Any]:
     return document
 
 
-async def _violated(_model: BehavioralModel, _prop: Property) -> VerificationResult:
+async def _violated(
+    model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
+) -> VerificationResult:
     """Движок нашёл нарушение."""
+    _ = (model, prop, emit_stage)
     return VerificationResult.model_validate(CASE_RESULT_VIOLATED)
 
 
-async def _holds(_model: BehavioralModel, _prop: Property) -> VerificationResult:
+async def _holds(
+    model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
+) -> VerificationResult:
     """Движок не нашёл нарушений."""
+    _ = (model, prop, emit_stage)
     return VerificationResult.model_validate(
         {
             "status": "PROPERTY_HOLDS",
