@@ -76,6 +76,13 @@ export const VERIFICATION_STATUS_META: Record<VerificationStatus, VerificationSt
     tone: 'danger',
     isPending: false,
   },
+  [VERIFICATION_STATUSES.cancelled]: {
+    headline: 'Анализ отменён',
+    explanation: 'Проверка остановлена по запросу пользователя. Результат по свойствам не получен.',
+    shortLabel: 'Отменён',
+    tone: 'neutral',
+    isPending: false,
+  },
 }
 
 /**

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useToast } from '../../lib/toastContext'
 import { queryKeys } from '../../lib/queryKeys'
 import type { RequirementPayload } from '../../types/api'
-import { createRequirement, fetchRequirements } from './requirementsApi'
+import { createRequirement, fetchRequirements, importRequirementFile } from './requirementsApi'
 
 export function useRequirements(projectId: string) {
   return useQuery({
@@ -28,4 +28,8 @@ export function useSaveRequirement(projectId: string) {
       })
     },
   })
+}
+
+export function useImportRequirement(projectId: string) {
+  return useMutation({ mutationFn: (file: File) => importRequirementFile(projectId, file) })
 }

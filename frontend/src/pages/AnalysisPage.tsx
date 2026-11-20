@@ -10,15 +10,18 @@ import { EmptyState } from '../components/EmptyState'
 import { Skeleton } from '../components/Skeleton'
 import { ReasoningToggle } from '../features/analysis/ReasoningToggle'
 import { VerificationDetails } from '../features/analysis/VerificationDetails'
+import { AnalysisProgress } from '../features/analysis/AnalysisProgress'
 import { VerificationHistory } from '../features/analysis/VerificationHistory'
 import { VerificationOutcome } from '../features/analysis/VerificationOutcome'
 import {
   useAnswerAnalysis,
+  useCancelAnalysis,
   useLlmCapabilities,
   useModelVersions,
   useStartAnalysis,
   useVerifications,
 } from '../features/analysis/useAnalysis'
+import { useAnalysisEvents } from '../features/analysis/useAnalysisEvents'
 import { ProjectHeader } from '../features/projects/ProjectHeader'
 import { useProject } from '../features/projects/useProjects'
 import { useRequirements } from '../features/requirements/useRequirements'
@@ -26,7 +29,6 @@ import { cn } from '../lib/cn'
 import { toUserMessage } from '../lib/errors'
 import { pluralizeVerifications } from '../lib/format'
 import { ANIMATION, MOTION_MEDIA } from '../lib/motion'
-import type { Verification } from '../types/api'
 
 const REDUCED_MOTION_MEDIA = '(prefers-reduced-motion: reduce)'
 
@@ -57,6 +59,7 @@ export function AnalysisPage() {
   const verificationsQuery = useVerifications(projectId)
   const startMutation = useStartAnalysis(projectId)
   const answerMutation = useAnswerAnalysis(projectId)
+  const cancelMutation = useCancelAnalysis(projectId)
   const capabilitiesQuery = useLlmCapabilities()
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -70,6 +73,7 @@ export function AnalysisPage() {
   // По умолчанию рассуждаем: качество модели важнее скорости. Если провайдер
   // не умеет или рассуждает всегда, выбор не показывается и не отправляется.
   const [reasoning, setReasoning] = useState(true)
+  const [reusedVerificationId, setReusedVerificationId] = useState<string | null>(null)
 
   const project = projectQuery.data ?? null
 
@@ -89,10 +93,15 @@ export function AnalysisPage() {
     verifications.find((verification) => verification.id === selectedVerificationId) ??
     verifications.at(0) ??
     null
+  const selectedRequirement = selectedVerification?.requirement_id
+    ? (requirements.find((requirement) => requirement.id === selectedVerification.requirement_id) ??
+      null)
+    : currentRequirement
   const verificationModel =
     models.find((model) => model.id === selectedVerification?.model_version_id) ?? currentModel
   const viewedModel =
     models.find((model) => model.id === selectedModelId) ?? verificationModel ?? currentModel
+  const analysisEvents = useAnalysisEvents(projectId, selectedVerification)
 
   const isLoading =
     projectQuery.isPending ||
@@ -220,7 +229,27 @@ export function AnalysisPage() {
     startMutation.mutate(
       { requirementId: currentRequirement.id, reasoning: reasoningChoice ? reasoning : null },
       {
-        onSuccess: (verification: Verification) => setSelectedVerificationId(verification.id),
+        onSuccess: ({ verification, mode }) => {
+          setSelectedVerificationId(verification.id)
+          setReusedVerificationId(mode === 'REUSED' ? verification.id : null)
+        },
+      },
+    )
+  }
+
+  const handleRecompute = () => {
+    if (currentRequirement === null) return
+    startMutation.mutate(
+      {
+        requirementId: currentRequirement.id,
+        reasoning: reasoningChoice ? reasoning : null,
+        forceRecompute: true,
+      },
+      {
+        onSuccess: ({ verification }) => {
+          setSelectedVerificationId(verification.id)
+          setReusedVerificationId(null)
+        },
       },
     )
   }
@@ -320,16 +349,41 @@ export function AnalysisPage() {
                 }
               />
             ) : (
-              <VerificationOutcome
-                key={selectedVerification.id}
-                verification={selectedVerification}
-                isDetailsOpen={isDetailsOpen}
-                onToggleDetails={handleToggleDetails}
-                onAnswer={
-                  canAnalyze ? (answer) => handleAnswer(selectedVerification.id, answer) : undefined
-                }
-                isAnswering={answerMutation.isPending}
-              />
+              <div className="flex h-full flex-col gap-4">
+                {reusedVerificationId === selectedVerification.id ? (
+                  <div
+                    role="status"
+                    className="rounded-field border border-success/25 bg-raised/30 px-4 py-3 text-xs text-success"
+                  >
+                    Показан сохранённый результат. Новый вызов LLM и TLC не выполнялся.
+                  </div>
+                ) : null}
+                {selectedVerification.status === 'PENDING' ||
+                selectedVerification.execution_status === 'QUEUED' ||
+                selectedVerification.execution_status === 'RUNNING' ||
+                selectedVerification.execution_status === 'CANCELLING' ? (
+                  <AnalysisProgress
+                    verification={selectedVerification}
+                    stages={analysisEvents.stages}
+                    streamState={analysisEvents.streamState}
+                    isCancelling={cancelMutation.isPending}
+                    onCancel={() => cancelMutation.mutate(selectedVerification.id)}
+                  />
+                ) : null}
+                <VerificationOutcome
+                  key={selectedVerification.id}
+                  verification={selectedVerification}
+                  requirementText={selectedRequirement?.raw_text ?? null}
+                  isDetailsOpen={isDetailsOpen}
+                  onToggleDetails={handleToggleDetails}
+                  onAnswer={
+                    canAnalyze
+                      ? (answer) => handleAnswer(selectedVerification.id, answer)
+                      : undefined
+                  }
+                  isAnswering={answerMutation.isPending}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -349,9 +403,19 @@ export function AnalysisPage() {
               <ReasoningToggle checked={reasoning} onChange={setReasoning} disabled={isStarting} />
             )}
             {canAnalyze ? (
-              <Button className="w-full" loading={isStarting} onClick={handleStartAnalysis}>
-                Запустить анализ
-              </Button>
+              <div className="flex flex-col gap-2">
+                <Button className="w-full" loading={isStarting} onClick={handleStartAnalysis}>
+                  Запустить анализ
+                </Button>
+                <Button
+                  className="w-full"
+                  variant="secondary"
+                  loading={isStarting}
+                  onClick={handleRecompute}
+                >
+                  Пересчитать заново
+                </Button>
+              </div>
             ) : (
               <Link className="w-full" to={`/projects/${project.id}`}>
                 <Button className="w-full" variant="secondary">

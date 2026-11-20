@@ -1,6 +1,6 @@
-import { apiRequest, HTTP_METHODS } from '../../lib/apiClient'
-import { decodeCollection, decodeRequirement } from '../../lib/decode'
-import type { Requirement, RequirementPayload } from '../../types/api'
+import { apiRequest, apiUpload, HTTP_METHODS } from '../../lib/apiClient'
+import { decodeCollection, decodeRequirement, decodeRequirementImport } from '../../lib/decode'
+import type { Requirement, RequirementImport, RequirementPayload } from '../../types/api'
 
 const requirementsPath = (projectId: string): string => `/projects/${projectId}/requirements`
 
@@ -15,3 +15,6 @@ export const createRequirement = (
     method: HTTP_METHODS.post,
     body: payload,
   })
+
+export const importRequirementFile = (projectId: string, file: File): Promise<RequirementImport> =>
+  apiUpload(`/projects/${projectId}/requirement-imports`, file, decodeRequirementImport)

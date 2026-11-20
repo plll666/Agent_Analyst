@@ -21,6 +21,37 @@ export interface Requirement {
   raw_text: string
   is_current: boolean
   created_at: string
+  source_import_id?: string | null
+  source_modified?: boolean
+  fragments?: RequirementFragment[]
+}
+
+export interface RequirementFragment {
+  id: string
+  kind: 'paragraph' | 'table_cell'
+  start: number
+  end: number
+  source_locator: string | null
+}
+
+export interface RequirementImport {
+  id: string
+  project_id: string
+  filename: string
+  format: 'txt' | 'docx'
+  size_bytes: number
+  sha256: string
+  raw_text: string
+  fragments: RequirementFragment[]
+  warnings: { code: string; message: string }[]
+  created_at: string
+}
+
+export interface RequirementImportCapabilities {
+  formats: ('txt' | 'docx')[]
+  max_file_bytes: number
+  max_text_chars: number
+  txt_encoding: string
 }
 
 export interface Collection<T> {
@@ -53,6 +84,7 @@ export interface ProjectPatch {
 
 export interface RequirementPayload {
   raw_text: string
+  source_import_id?: string | null
 }
 
 export const API_ERROR_CODES = {
@@ -108,6 +140,7 @@ export const VERIFICATION_STATUSES = {
   stateLimitReached: 'STATE_LIMIT_REACHED',
   engineError: 'ENGINE_ERROR',
   agentError: 'AGENT_ERROR',
+  cancelled: 'CANCELLED',
 } as const
 
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[keyof typeof VERIFICATION_STATUSES]
@@ -120,6 +153,7 @@ export const TERMINAL_VERIFICATION_STATUSES: VerificationStatus[] = [
   VERIFICATION_STATUSES.stateLimitReached,
   VERIFICATION_STATUSES.engineError,
   VERIFICATION_STATUSES.agentError,
+  VERIFICATION_STATUSES.cancelled,
 ]
 
 export type Literal = string | number | boolean | null
@@ -219,7 +253,49 @@ export type RootCause = (typeof ROOT_CAUSES)[keyof typeof ROOT_CAUSES]
 export interface RelatedRequirement {
   paragraph_ref: string | null
   quote: string | null
+  requirement_id?: string | null
+  start?: number | null
+  end?: number | null
 }
+
+export type ExecutionStatus =
+  'QUEUED' | 'RUNNING' | 'CANCELLING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+
+export type StageState = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'SKIPPED'
+
+export interface AnalysisStage {
+  stage_id: string
+  parent_stage_id: string | null
+  scope: 'agent' | 'core'
+  name: string
+  state: StageState
+  build_index: number | null
+  attempt: number
+  property_id: string | null
+  started_at: string | null
+  finished_at: string | null
+  duration_ms: number | null
+  reason_code: string | null
+  message: string | null
+  statistics: VerificationStatistics | null
+}
+
+export interface AnalysisEvent {
+  schema_version: number
+  verification_id: string
+  seq: number
+  occurred_at: string
+  type: 'run.updated' | 'stage.updated' | 'stage.statistics' | 'agent.rebuild' | 'run.finished'
+  data: Record<string, unknown>
+}
+
+export interface AnalysisEventPage {
+  items: AnalysisEvent[]
+  next_after_seq: number
+  has_more: boolean
+}
+
+export type SubmissionMode = 'CREATED' | 'REUSED' | 'IN_PROGRESS'
 
 export interface Verification {
   id: string
@@ -242,6 +318,12 @@ export interface Verification {
   /** Выбор пользователя: рассуждала ли модель; null — режим не выбирали. */
   reasoning?: boolean | null
   created_at: string
+  execution_status?: ExecutionStatus
+  input_key?: string
+  started_at?: string | null
+  finished_at?: string | null
+  last_event_seq?: number
+  active_stages?: AnalysisStage[]
 }
 
 export interface LlmCapabilities {
