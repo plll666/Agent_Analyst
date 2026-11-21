@@ -44,11 +44,22 @@ from app.agent.orchestrator import (
     generation_profile,
     run_iteration,
 )
+from app.agent.stages import (
+    REASON_GATE_REJECTED,
+    REASON_MODEL_INTERPRETATION_ERROR,
+)
 from app.database.models import Verification, VerificationEvent
 from app.database.session import create_engine_and_sessionmaker, session_scope
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.explanation import summary_for
-from app.domain.stages import Stage, StageState, stage_event_data
+from app.domain.stages import (
+    AGENT_REBUILD,
+    STAGE_UPDATED,
+    Stage,
+    StageScope,
+    StageState,
+    stage_event_data,
+)
 from app.domain.verdict import combine
 from app.domain.verification import (
     VerificationExplanation,
@@ -248,49 +259,68 @@ async def _run_agent_iteration(
         context = replace(context, model_version_id=version_id)
 
     async def emit_stage(event: AgentEvent) -> None:
-        """Связать событие этапа с прогоном и записать в журнал воркера.
+        """Записать событие прогона в историю и связать его с текущим этапом.
 
-        Долговременное хранение и доставка через SSE — задачи backend (Б4/Б5);
-        здесь событие получает идентичность прогона, без которой его нельзя
-        сопоставить с записью в БД.
+        Воркер делает две вещи, которых не делает агент: добавляет идентичность
+        прогона и сохраняет событие так, чтобы история осталась после
+        перезапуска. Здесь же он вкладывает этапы ядра в текущий ``agent/check``
+        и превращает отказ ворот или объяснения в событие ``agent.rebuild``:
+        граф сообщает причину, а воркер решает, как она выглядит в истории.
         """
-        logger.info(
-            "прогон %s: событие этапа %s",
-            context.verification_id,
-            event.model_dump_json(),
-        )
-
-    settings = LLMSettings.from_env()
-
-    async def emit_stage(stage: Stage) -> None:
         nonlocal active_check
-        if stage.scope == "agent" and stage.name == "check":
-            active_check = stage if stage.state == "RUNNING" else None
-        async with session_scope(sessionmaker) as session:
-            if stage.state == StageState.RUNNING:
-                await _ensure_not_cancelled(session, identifier)
-            await runs.append_event(
-                session,
-                identifier,
-                "stage.statistics" if stage.statistics else "stage.updated",
-                stage_event_data(stage),
-                stage.stage_id,
-            )
-            if stage.scope == "agent" and stage.reason_code in {
-                "GATE_REJECTED",
-                "MODEL_INTERPRETATION_ERROR",
-            }:
+        if isinstance(event, Stage):
+            if event.scope is StageScope.AGENT and event.name == "check":
+                active_check = event if event.state is StageState.RUNNING else None
+            kind = "stage.statistics" if event.statistics else STAGE_UPDATED
+            async with session_scope(sessionmaker) as session:
+                if event.state is StageState.RUNNING:
+                    await _ensure_not_cancelled(session, identifier)
                 await runs.append_event(
                     session,
                     identifier,
-                    "agent.rebuild",
-                    {
-                        "from_build_index": stage.build_index,
-                        "to_build_index": stage.build_index + 1,
-                        "reason_code": stage.reason_code,
-                        "message": "Агент перестраивает модель после замечаний",
-                    },
+                    kind,
+                    stage_event_data(event),
+                    event.stage_id,
                 )
+                if event.scope is StageScope.AGENT and event.reason_code in {
+                    REASON_GATE_REJECTED,
+                    REASON_MODEL_INTERPRETATION_ERROR,
+                }:
+                    await runs.append_event(
+                        session,
+                        identifier,
+                        AGENT_REBUILD,
+                        {
+                            "from_build_index": event.build_index,
+                            "to_build_index": event.build_index + 1,
+                            "reason_code": event.reason_code,
+                            "message": "Агент перестраивает модель после замечаний",
+                        },
+                    )
+            return
+        async with session_scope(sessionmaker) as session:
+            await runs.append_event(
+                session,
+                identifier,
+                AGENT_REBUILD,
+                event.model_dump(mode="json"),
+                None,
+            )
+
+    settings = LLMSettings.from_env()
+    limits = CycleLimits(
+        build_attempts=settings.max_attempts,
+        max_rebuilds=MAX_REBUILDS,
+        explanation_attempts=settings.max_attempts,
+    )
+    generation = generation_profile(
+        settings,
+        build_attempts=limits.build_attempts,
+        max_rebuilds=limits.max_rebuilds,
+        explanation_attempts=limits.explanation_attempts,
+        reasoning=reasoning,
+    )
+    logger.info("прогон %s: профиль генерации %s", identifier, generation.fingerprint())
 
     iteration = await run_iteration(
         client=client,
@@ -300,6 +330,7 @@ async def _run_agent_iteration(
         on_model=on_model,
         reasoning=reasoning,
         emit_stage=emit_stage,
+        generation=generation,
     )
 
     if artifacts:

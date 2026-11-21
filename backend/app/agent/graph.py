@@ -33,12 +33,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from functools import lru_cache, partial
 from typing import Any, Protocol, TypedDict, cast
 
@@ -62,7 +59,6 @@ from app.agent.stages import (
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.decision import AnalysisDecision, decide
 from app.domain.explanation import summary_for
-from app.domain.stages import Stage, StageState
 from app.domain.verdict import combine
 from app.domain.verification import (
     RootCause,
@@ -295,56 +291,6 @@ def _compiled(max_rebuilds: int) -> Any:
     builder.add_edge("fail", END)
 
     return builder.compile()
-
-
-async def _observe(state: CycleState, *, name: str, attempt: int, handler: Any) -> dict[str, Any]:
-    emit = state.get("emit_stage")
-    if emit is None:
-        return await handler(state)
-    started = datetime.now(UTC)
-    stage = Stage(
-        stage_id=str(uuid.uuid4()),
-        scope="agent",
-        name=name,
-        state=StageState.RUNNING,
-        build_index=attempt,
-        attempt=1,
-        started_at=started,
-    )
-    await emit(stage)
-    try:
-        result = await handler(state)
-    except BaseException as error:
-        finished = datetime.now(UTC)
-        await emit(
-            stage.model_copy(
-                update={
-                    "state": StageState.CANCELLED
-                    if isinstance(error, asyncio.CancelledError)
-                    else StageState.FAILED,
-                    "finished_at": finished,
-                    "duration_ms": max(0, int((finished - started).total_seconds() * 1000)),
-                    "reason_code": "CANCEL_REQUESTED"
-                    if isinstance(error, asyncio.CancelledError)
-                    else "STAGE_FAILED",
-                }
-            )
-        )
-        raise
-    finished = datetime.now(UTC)
-    await emit(
-        stage.model_copy(
-            update={
-                "state": StageState.SUCCEEDED,
-                "finished_at": finished,
-                "duration_ms": max(0, int((finished - started).total_seconds() * 1000)),
-                "reason_code": ("GATE_REJECTED" if name == "gate" else "MODEL_INTERPRETATION_ERROR")
-                if result.get("route") == ROUTE_TO_REBUILD
-                else None,
-            }
-        )
-    )
-    return result
 
 
 def _route(state: CycleState) -> str:
