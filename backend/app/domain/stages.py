@@ -116,7 +116,8 @@ EVENT_TYPES: frozenset[str] = frozenset(
     {RUN_UPDATED, STAGE_UPDATED, STAGE_STATISTICS, AGENT_REBUILD, RUN_FINISHED}
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION: Literal[1] = 1
+"""Версия схемы событий прогона: растёт вместе с форматом ``data``."""
 
 
 class EventEnvelope(BaseModel):

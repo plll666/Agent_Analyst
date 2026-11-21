@@ -39,7 +39,9 @@ from app.agent.explainer import explain_result
 from app.agent.llm import LLMClient, LLMError, LLMSettings, client_from_env
 from app.agent.orchestrator import (
     ENGINE_WHEN_AGENT_FAILED,
+    AgentEvent,
     CycleLimits,
+    generation_profile,
     run_iteration,
 )
 from app.database.models import Verification, VerificationEvent
@@ -245,6 +247,19 @@ async def _run_agent_iteration(
         await attach_model_version(sessionmaker, context.verification_id, version_id)
         context = replace(context, model_version_id=version_id)
 
+    async def emit_stage(event: AgentEvent) -> None:
+        """Связать событие этапа с прогоном и записать в журнал воркера.
+
+        Долговременное хранение и доставка через SSE — задачи backend (Б4/Б5);
+        здесь событие получает идентичность прогона, без которой его нельзя
+        сопоставить с записью в БД.
+        """
+        logger.info(
+            "прогон %s: событие этапа %s",
+            context.verification_id,
+            event.model_dump_json(),
+        )
+
     settings = LLMSettings.from_env()
 
     async def emit_stage(stage: Stage) -> None:
@@ -281,11 +296,7 @@ async def _run_agent_iteration(
         client=client,
         requirement_text=context.requirement_text,
         check_property=check_property,
-        limits=CycleLimits(
-            build_attempts=settings.max_attempts,
-            max_rebuilds=MAX_REBUILDS,
-            explanation_attempts=settings.max_attempts,
-        ),
+        limits=limits,
         on_model=on_model,
         reasoning=reasoning,
         emit_stage=emit_stage,

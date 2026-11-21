@@ -92,8 +92,9 @@ def _agent_error_payload(hypothesis: str) -> dict[str, Any]:
     }
 
 
-async def _violated(_model: BehavioralModel, _prop: Property) -> VerificationResult:
+async def _violated(model: BehavioralModel, prop: Property) -> VerificationResult:
     """Движок нашёл нарушение."""
+    _ = (model, prop)
     return VerificationResult.model_validate(CASE_RESULT_VIOLATED)
 
 

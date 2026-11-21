@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from app.agent.generation import GenerationProfile, generation_profile
 from app.agent.graph import (
     ENGINE_WHEN_AGENT_FAILED,
     CheckProperty,
@@ -29,15 +30,32 @@ from app.agent.graph import (
     graph_mermaid,
     run_iteration,
 )
+from app.agent.stages import (
+    AgentEvent,
+    AgentRebuild,
+    Stage,
+    StageEmitter,
+    StageReporter,
+)
+from app.domain.stages import StageScope, StageState
 
 __all__ = [
     "ENGINE_WHEN_AGENT_FAILED",
+    "AgentEvent",
+    "AgentRebuild",
     "CheckProperty",
     "CycleLimits",
     "CycleState",
+    "GenerationProfile",
     "Iteration",
     "ModelHandler",
+    "Stage",
+    "StageEmitter",
+    "StageReporter",
+    "StageScope",
+    "StageState",
     "compiled_graph",
+    "generation_profile",
     "graph_mermaid",
     "run_iteration",
 ]

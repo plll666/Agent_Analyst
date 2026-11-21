@@ -34,6 +34,8 @@ from instructor.core.client import AsyncInstructor
 from instructor.core.exceptions import InstructorRetryException
 from pydantic import BaseModel
 
+from app.agent import tls  # noqa: F401 - подключает хранилище ОС до исходящих вызовов
+
 logger = logging.getLogger(__name__)
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
