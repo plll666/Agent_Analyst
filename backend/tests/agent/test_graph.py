@@ -10,7 +10,6 @@ from collections import defaultdict
 from typing import Any
 
 from app.agent.graph import CycleLimits, compiled_graph, graph_mermaid, run_iteration
-from app.agent.stages import StageEmitter
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.decision import AnalysisDecision
 from app.domain.verification import VerificationResult, VerificationStatus
@@ -93,11 +92,9 @@ def _agent_error_payload(hypothesis: str) -> dict[str, Any]:
     }
 
 
-async def _violated(
-    model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
-) -> VerificationResult:
+async def _violated(model: BehavioralModel, prop: Property) -> VerificationResult:
     """Движок нашёл нарушение."""
-    _ = (model, prop, emit_stage)
+    _ = (model, prop)
     return VerificationResult.model_validate(CASE_RESULT_VIOLATED)
 
 

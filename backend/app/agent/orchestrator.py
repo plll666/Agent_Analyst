@@ -37,6 +37,7 @@ from app.agent.stages import (
     StageEmitter,
     StageReporter,
 )
+from app.domain.stages import StageScope, StageState
 
 __all__ = [
     "ENGINE_WHEN_AGENT_FAILED",
@@ -51,6 +52,8 @@ __all__ = [
     "Stage",
     "StageEmitter",
     "StageReporter",
+    "StageScope",
+    "StageState",
     "compiled_graph",
     "generation_profile",
     "graph_mermaid",

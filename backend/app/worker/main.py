@@ -41,7 +41,6 @@ from app.agent.orchestrator import (
     ENGINE_WHEN_AGENT_FAILED,
     AgentEvent,
     CycleLimits,
-    StageEmitter,
     generation_profile,
     run_iteration,
 )
@@ -189,15 +188,13 @@ async def _run_agent_iteration(
     # и последняя версия артефактов должна заменить предыдущую, а не задвоиться.
     artifacts: dict[str, StoredArtifact] = {}
 
-    async def check_property(
-        model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
-    ) -> VerificationResult:
+    async def check_property(model: BehavioralModel, prop: Property) -> VerificationResult:
         """Проверить свойство движком и сохранить артефакты прогона.
 
-        ``emit_stage`` принимается для совместимости с интерфейсом агента:
-        этапы ядра (validate, TLC, разбор) — отдельная задача backend (Б10).
+        Этапы ядра (``validate``, TLC, разбор) приходят отдельным callback'ом в
+        сам движок — это задача backend (Б10); граф передаёт только модель и
+        свойство, как требует его контракт.
         """
-        _ = emit_stage
         outcome = await checker.check(model, prop)
         for stored in store.save_run(
             str(context.verification_id),

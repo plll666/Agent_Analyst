@@ -25,8 +25,10 @@
 Модуль ничего не знает про БД и очередь: на входе текст требования, клиент LLM
 и способ проверить одно свойство; на выходе — результат, объяснение и решение.
 Запись в базу делает вызывающая сторона. Ход выполнения агент сообщает через
-необязательный callback ``emit_stage``: этапы ``build``/``gate``/``check``/
-``explain`` и факты перестроения. Куда эти события попадают, решает воркер.
+необязательный callback ``emit_stage``: полный снимок этапа
+(:class:`~app.domain.stages.Stage`) и факт перестроения модели. Форма события —
+общая с ядром (контракт §5.1), поэтому воркер и адаптер движка рисуют один и
+тот же этап одинаково.
 """
 
 from __future__ import annotations
@@ -71,18 +73,13 @@ logger = logging.getLogger(__name__)
 class CheckProperty(Protocol):
     """Как проверить одно свойство модели детерминированным движком.
 
-    ``emit_stage`` — тот же callback, что получает агент: адаптер ядра
-    передаёт через него вложенные этапы проверки (``validate``, ``tlc_run`` и
-    остальные), а граф подставляет им родительский ``agent/check``.
+    Адаптер ядра сам сообщает о своих этапах (``validate``, ``tlc_run`` и
+    остальные) через тот же ``emit_stage``, что получил воркер: граф не
+    передаёт callback в проверку, а воркер вкладывает этапы ядра в текущий
+    ``agent/check``. Так ядро не знает про DAG, а граф — про этапы движка.
     """
 
-    async def __call__(
-        self,
-        model: BehavioralModel,
-        prop: Property,
-        *,
-        emit_stage: StageEmitter | None = None,
-    ) -> VerificationResult:
+    async def __call__(self, model: BehavioralModel, prop: Property) -> VerificationResult:
         """Проверить одно свойство и вернуть результат."""
         ...
 
@@ -413,7 +410,13 @@ async def _check(state: CycleState, *, attempt: int) -> dict[str, Any]:
 async def _check_one(
     state: CycleState, model: BehavioralModel, prop: Property, *, build_index: int
 ) -> VerificationResult:
-    """Проверить одно свойство; этап ``check`` становится родителем этапов ядра."""
+    """Проверить одно свойство; этап ``check`` становится родителем этапов ядра.
+
+    Callback в проверку не передаётся: этапы ядра приходят в воркер тем же
+    ``emit_stage``, а он вкладывает их в текущий ``agent/check``. Поэтому
+    ``property_id`` проверяемого свойства здесь известен, а внутри движка —
+    уже нет, и связывает их воркер.
+    """
     reporter = _reporter(state)
     stage_id = await reporter.start(
         "check",
@@ -422,9 +425,7 @@ async def _check_one(
         message=f"Проверка свойства {prop.id}",
     )
     try:
-        result = await state["check_property"](
-            model, prop, emit_stage=reporter.child(stage_id) if stage_id else None
-        )
+        result = await state["check_property"](model, prop)
     except Exception as error:
         await reporter.finish(
             stage_id,

@@ -23,6 +23,7 @@ from app.agent.stages import (
     Stage,
     StageEmitter,
     StageReporter,
+    StageState,
 )
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.verification import VerificationResult
@@ -87,10 +88,8 @@ def _explanation_batch() -> tuple[dict[str, Any], ...]:
     return (explanation_payload(),)
 
 
-async def _violated(
-    model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
-) -> VerificationResult:
-    _ = (model, prop, emit_stage)
+async def _violated(model: BehavioralModel, prop: Property) -> VerificationResult:
+    _ = (model, prop)
     return VerificationResult.model_validate(CASE_RESULT_VIOLATED)
 
 
@@ -254,23 +253,17 @@ async def test_build_failure_is_a_failed_stage() -> None:
     assert not _rebuilds(collector.events)
 
 
-async def test_core_stages_are_nested_under_check() -> None:
-    """Адаптер ядра получает эмиттер, а его этапы ссылаются на agent/check."""
+async def test_check_reports_one_stage_per_property() -> None:
+    """Каждое свойство получает свой ``agent/check`` с его идентификатором.
+
+    Этапы ядра вкладывает в этот ``check`` вызывающая сторона: граф не передаёт
+    callback в проверку, поэтому здесь проверяется только то, что за него
+    отвечает граф — номер ступени и ``property_id``.
+    """
     collector = Collector()
 
-    async def check_property(
-        model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
-    ) -> VerificationResult:
-        _ = model
-        assert emit_stage is not None
-        await emit_stage(
-            _stage(
-                stage_id="core-1",
-                scope="core",
-                name="tlc_run",
-                property_id=prop.id,
-            )
-        )
+    async def check_property(model: BehavioralModel, prop: Property) -> VerificationResult:
+        _ = (model, prop)
         return VerificationResult.model_validate(CASE_RESULT_VIOLATED)
 
     client = FakeLLM(_cited_model(), *_explanation_batch())
@@ -282,10 +275,48 @@ async def test_core_stages_are_nested_under_check() -> None:
         emit_stage=collector,
     )
 
-    core = next(stage for stage in _stages(collector.events) if stage.stage_id == "core-1")
-    check = next(stage for stage in _stages(collector.events) if stage.name == "check")
-    assert core.parent_stage_id == check.stage_id
-    assert core.property_id == check.property_id
+    checks = [stage for stage in _stages(collector.events) if stage.name == "check"]
+    started = [stage for stage in checks if stage.state == StageState.RUNNING]
+    finished = [stage for stage in checks if stage.state is StageState.SUCCEEDED]
+
+    assert len(started) == len(finished) == 4
+    assert [stage.property_id for stage in started] == ["P1", "P2", "P3", "P4"]
+    assert {stage.stage_id for stage in started} == {stage.stage_id for stage in finished}
+    assert {stage.build_index for stage in checks} == {0}
+    assert all(stage.parent_stage_id is None for stage in checks)
+
+
+async def test_reporter_child_nests_core_stages_under_a_check() -> None:
+    """``child`` вкладывает этапы ядра в начатый ``agent/check``.
+
+    Метод нужен вызывающей стороне: воркер передаёт его адаптеру движка, чтобы
+    ``tlc_run`` и остальные этапы ядра ссылались на проверяемое свойство.
+    """
+    collector = Collector()
+    reporter = StageReporter(collector)
+    check_id = await reporter.start("check", build_index=2, property_id="P7")
+
+    await reporter.child(check_id)(
+        _stage(stage_id="core-1", scope="core", name="tlc_run", property_id="P7")
+    )
+
+    core = _stages(collector.events)[-1]
+    assert core.parent_stage_id == check_id
+    assert core.build_index == 2
+    assert core.property_id == "P7"
+
+
+async def test_reporter_child_without_parent_does_not_invent_one() -> None:
+    """Без начатого этапа ``child`` не подставляет родителя: выдумывать нечего."""
+    collector = Collector()
+    reporter = StageReporter(collector)
+
+    await reporter.child("missing")(
+        _stage(stage_id="core-1", scope="core", name="tlc_run", property_id=None)
+    )
+
+    core = _stages(collector.events)[-1]
+    assert core.parent_stage_id is None
 
 
 def test_stage_serializes_to_contract_shape() -> None:

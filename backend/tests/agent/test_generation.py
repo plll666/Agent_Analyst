@@ -21,8 +21,7 @@ from app.agent.generation import (
 )
 from app.agent.graph import CycleLimits, run_iteration
 from app.agent.prompts import EXPLANATION_PROMPT_VERSION, MODELING_PROMPT_VERSION
-from app.agent.stages import StageEmitter
-from app.domain.behavioral_model import SCHEMA_VERSION, BehavioralModel, Property
+from app.domain.behavioral_model import MODEL_SCHEMA_VERSION, BehavioralModel, Property
 from app.domain.verification import VerificationResult
 from tests.agent.support import FakeLLM, cited_payload, explanation_payload, settings
 from tests.domain.case_examples import CASE_RESULT_VIOLATED, case_model
@@ -50,7 +49,7 @@ def _profile(**overrides: Any) -> GenerationProfile:
 def test_profile_captures_versions_model_and_limits() -> None:
     profile = _profile()
 
-    assert profile.model_schema_version == SCHEMA_VERSION
+    assert profile.model_schema_version == MODEL_SCHEMA_VERSION
     assert profile.agent_logic_version == AGENT_LOGIC_VERSION
     assert profile.modeling_prompt_version == MODELING_PROMPT_VERSION
     assert profile.explanation_prompt_version == EXPLANATION_PROMPT_VERSION
@@ -152,10 +151,8 @@ def test_profile_is_immutable() -> None:
         profile.llm_model = "changed"  # type: ignore[misc]
 
 
-async def _violated(
-    model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
-) -> VerificationResult:
-    _ = (model, prop, emit_stage)
+async def _violated(model: BehavioralModel, prop: Property) -> VerificationResult:
+    _ = (model, prop)
     return VerificationResult.model_validate(CASE_RESULT_VIOLATED)
 
 

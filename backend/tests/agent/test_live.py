@@ -18,7 +18,6 @@ from app.agent.llm import LLMClient, LLMSettings, client_from_env
 from app.agent.orchestrator import (
     CycleLimits,
     Iteration,
-    StageEmitter,
     generation_profile,
     run_iteration,
 )
@@ -41,10 +40,7 @@ pytestmark = [pytest.mark.agent, pytest.mark.integration]
 async def _iterate(client: LLMClient, checker: ModelChecker, requirement_text: str) -> Iteration:
     """Провести итерацию цикла с настоящим движком TLC."""
 
-    async def check_property(
-        model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
-    ) -> VerificationResult:
-        _ = emit_stage
+    async def check_property(model: BehavioralModel, prop: Property) -> VerificationResult:
         outcome = await checker.check(model, prop)
         return outcome.result
 
