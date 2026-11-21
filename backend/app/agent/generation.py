@@ -20,7 +20,7 @@ from typing import Any
 
 from app.agent.llm import LLMSettings
 from app.agent.prompts import EXPLANATION_PROMPT_VERSION, MODELING_PROMPT_VERSION
-from app.domain.behavioral_model import SCHEMA_VERSION
+from app.domain.behavioral_model import MODEL_SCHEMA_VERSION
 
 AGENT_LOGIC_VERSION = "agent-2026-11-20.1"
 """Версия логики агента: схема DAG, правила ворот и критерии причин.
@@ -35,7 +35,7 @@ class GenerationProfile:
     """Настройки, при которых агент построил модель и объяснение.
 
     Attributes:
-        model_schema_version: Версия схемы ``BehavioralModel``.
+        model_schema_version: Версия схемы документа ``BehavioralModel``.
         agent_logic_version: Версия логики агента (граф, ворота, критерии).
         modeling_prompt_version: Версия промпта построения модели.
         explanation_prompt_version: Версия промпта объяснения контрпримера.
@@ -52,7 +52,7 @@ class GenerationProfile:
         llm_max_attempts: Бюджет попыток пригодного ответа у клиента LLM.
     """
 
-    model_schema_version: int
+    model_schema_version: str
     agent_logic_version: str
     modeling_prompt_version: str
     explanation_prompt_version: str
@@ -126,7 +126,7 @@ def generation_profile(
     else:
         reasoning_mode = "disabled"
     return GenerationProfile(
-        model_schema_version=SCHEMA_VERSION,
+        model_schema_version=MODEL_SCHEMA_VERSION,
         agent_logic_version=AGENT_LOGIC_VERSION,
         modeling_prompt_version=MODELING_PROMPT_VERSION,
         explanation_prompt_version=EXPLANATION_PROMPT_VERSION,

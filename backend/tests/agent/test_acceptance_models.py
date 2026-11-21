@@ -19,7 +19,6 @@ import pytest
 
 from app.agent.generation import GenerationProfile, generation_profile
 from app.agent.graph import CheckProperty, CycleLimits, run_iteration
-from app.agent.stages import StageEmitter
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.verification import VerificationResult, VerificationStatus
 from app.worker.model_checker import EngineSettings, ModelChecker
@@ -50,10 +49,7 @@ def _checker(tmp_path: Path) -> ModelChecker:
 
 
 def _checker_adapter(checker: ModelChecker) -> CheckProperty:
-    async def check_property(
-        model: BehavioralModel, prop: Property, *, emit_stage: StageEmitter | None = None
-    ) -> VerificationResult:
-        _ = emit_stage
+    async def check_property(model: BehavioralModel, prop: Property) -> VerificationResult:
         outcome = await checker.check(model, prop)
         return outcome.result
 
