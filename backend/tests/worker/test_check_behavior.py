@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from app.agent.llm import LLMError
-from app.database.models import ModelVersion, Requirement
+from app.database.models import ModelVersion, Requirement, Verification
 from app.database.session import session_scope
 from app.domain.explanation import summary_for
 from app.domain.verification import VerificationResult, VerificationStatus
@@ -227,6 +227,9 @@ async def _link_requirement(sessions: Any, run: SeededRun) -> uuid.UUID:
         version = await session.get(ModelVersion, run.model_version_id)
         assert version is not None
         version.requirement_id = requirement_id
+        verification = await session.get(Verification, run.verification_id)
+        assert verification is not None
+        verification.requirement_id = requirement_id
     return requirement_id
 
 
@@ -236,7 +239,7 @@ async def test_violation_is_explained_in_requirement_language(
 ) -> None:
     """Объяснение агента пишется в ту же строку, что и контрпример движка."""
     await seed_store_document(sessions, seeded_run.model_version_id, acceptance_model(False))
-    await _link_requirement(sessions, seeded_run)
+    requirement_id = await _link_requirement(sessions, seeded_run)
     worker_ctx[_LLM_KEY] = FakeLLM(explanation_payload())
 
     status = await check_behavior(worker_ctx, str(seeded_run.verification_id))
@@ -248,9 +251,10 @@ async def test_violation_is_explained_in_requirement_language(
     assert row.question == "Должна ли отменённая заявка оставаться исполнимой?"
     assert row.root_cause == "REQUIREMENT_ERROR"
     assert row.business_summary.splitlines() == [f"Шаг {index}." for index in range(1, 5)]
-    assert row.related_requirements == [
-        {"quote": "Пользователь может отменить заявку до исполнения."}
+    assert [item["quote"] for item in row.related_requirements] == [
+        "Пользователь может отменить заявку до исполнения."
     ]
+    assert [item["requirement_id"] for item in row.related_requirements] == [str(requirement_id)]
 
 
 @requires_java
