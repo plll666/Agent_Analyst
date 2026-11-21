@@ -62,6 +62,7 @@ export function useAnalysisEvents(projectId: string, verification: Verification 
           void queryClient.invalidateQueries({ queryKey: queryKeys.verifications(projectId) })
         }
       } catch {
+        // Битое событие не должно ронять разбор остальных: пропускаем его молча.
       }
     }
     const eventTypes = [

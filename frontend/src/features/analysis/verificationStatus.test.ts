@@ -18,8 +18,8 @@ const INCONCLUSIVE_STATUSES = [
 ]
 
 describe('VERIFICATION_STATUS_META', () => {
-  it('описывает все восемь статусов контракта', () => {
-    expect(ALL_STATUSES).toHaveLength(8)
+  it('описывает все девять статусов контракта', () => {
+    expect(ALL_STATUSES).toHaveLength(9)
     expect(Object.keys(VERIFICATION_STATUS_META).sort()).toEqual([...ALL_STATUSES].sort())
   })
 

@@ -1,4 +1,5 @@
 import { formatDuration } from '../../lib/format'
+import { useNow } from '../../lib/useNow'
 import type { AnalysisStage, Verification } from '../../types/api'
 
 const STAGE_LABELS: Record<string, string> = {
@@ -21,11 +22,11 @@ const STATE_LABELS: Record<AnalysisStage['state'], string> = {
   SKIPPED: 'Пропущен',
 }
 
-function StageRow({ stage }: { stage: AnalysisStage }) {
+function StageRow({ stage, now }: { stage: AnalysisStage; now: number }) {
   const duration =
     stage.duration_ms ??
     (stage.state === 'RUNNING' && stage.started_at !== null
-      ? Math.max(0, Date.now() - Date.parse(stage.started_at))
+      ? Math.max(0, now - Date.parse(stage.started_at))
       : null)
 
   return (
@@ -89,6 +90,8 @@ export function AnalysisProgress({
 }: AnalysisProgressProps) {
   const state = verification.execution_status
   const isActive = state === 'QUEUED' || state === 'RUNNING' || state === 'CANCELLING'
+  const hasRunning = stages.some((stage) => stage.state === 'RUNNING')
+  const now = useNow(hasRunning)
   return (
     <section
       aria-live="polite"
@@ -126,7 +129,7 @@ export function AnalysisProgress({
       ) : (
         <ol className="flex flex-col">
           {stages.map((stage) => (
-            <StageRow key={stage.stage_id} stage={stage} />
+            <StageRow key={stage.stage_id} stage={stage} now={now} />
           ))}
         </ol>
       )}
