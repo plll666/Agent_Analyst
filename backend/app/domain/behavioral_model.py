@@ -35,6 +35,11 @@ MODEL_SCHEMA_VERSION = "behavioral-model-1"
 
 EXPRESSION_REQUIRED_TYPES = frozenset({"invariant", "forbidden_state", "reachable"})
 
+# Версия схемы документа BehavioralModel: входит в ключ входа прогона
+# (контракт спринта 3, раздел 3.1). Меняется при любом изменении, из-за
+# которого прежний документ перестаёт означать то же самое.
+MODEL_SCHEMA_VERSION = "behavioral-model-1"
+
 _VARIABLE_KIND: Mapping[VariableType, str] = {"enum": "str", "boolean": "bool", "integer": "int"}
 
 

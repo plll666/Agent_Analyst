@@ -44,10 +44,11 @@ from app.agent.orchestrator import (
     generation_profile,
     run_iteration,
 )
-from app.database.models import Verification
+from app.database.models import Verification, VerificationEvent
 from app.database.session import create_engine_and_sessionmaker, session_scope
 from app.domain.behavioral_model import BehavioralModel, Property
 from app.domain.explanation import summary_for
+from app.domain.stages import Stage, StageState, stage_event_data
 from app.domain.verdict import combine
 from app.domain.verification import (
     VerificationExplanation,
@@ -55,6 +56,7 @@ from app.domain.verification import (
     VerificationStatus,
 )
 from app.repositories import runs
+from app.services.run_key import analysis_input_key
 from app.worker.artifacts import LocalArtifactStore, RunArtifacts, StoredArtifact
 from app.worker.model_checker import EngineSettings, ModelChecker
 from app.worker.repository import (
@@ -144,7 +146,11 @@ async def run_analysis(
     identifier = uuid.UUID(verification_id)
     sessions = ctx[_SESSIONS_KEY]
     try:
-        return await _run_agent_iteration(ctx, identifier, reasoning)
+        return await _run_cancellable(
+            sessions, identifier, _run_agent_iteration(ctx, identifier, reasoning)
+        )
+    except CheckBehaviorError:
+        raise
     except (asyncio.CancelledError, TimeoutError):
         # arq ждёт нас по job_timeout, снятие по рестарту прерывает работу
         # в произвольной точке — результат должен появиться в БД.
@@ -170,12 +176,32 @@ async def _run_agent_iteration(
     store: LocalArtifactStore = ctx[_STORE_KEY]
     client: LLMClient | None = ctx.get(_LLM_KEY)
 
-    await _check_run_is_pending(sessionmaker, identifier)
+    existing = await _check_run_is_pending(sessionmaker, identifier)
+    if existing is not None:
+        return existing
 
     try:
         context = await load_analysis_context(sessionmaker, identifier)
     except VerificationNotFoundError as missing:
         raise CheckBehaviorError(str(missing)) from missing
+
+    async with session_scope(sessionmaker) as session:
+        expected_key = await session.scalar(
+            select(Verification.input_key).where(Verification.id == identifier)
+        )
+    if expected_key and context.requirement_id and context.requirement_text:
+        actual_key = analysis_input_key(
+            project_id=context.project_id,
+            requirement_id=context.requirement_id,
+            requirement_text=context.requirement_text,
+            reasoning=reasoning,
+        )
+        if actual_key != expected_key:
+            return await _fail_without_llm(
+                sessionmaker,
+                context,
+                "Конфигурация анализа изменилась после постановки задачи; запустите анализ заново",
+            )
 
     if client is None:
         return await _fail_without_llm(sessionmaker, context)
@@ -187,15 +213,20 @@ async def _run_agent_iteration(
     # Ключ — путь файла: при перестройке модели свойство проверяется повторно,
     # и последняя версия артефактов должна заменить предыдущую, а не задвоиться.
     artifacts: dict[str, StoredArtifact] = {}
+    active_check: Stage | None = None
 
     async def check_property(model: BehavioralModel, prop: Property) -> VerificationResult:
-        """Проверить свойство движком и сохранить артефакты прогона.
+        async def emit_core(stage: Stage) -> None:
+            if active_check is not None:
+                stage = stage.model_copy(
+                    update={
+                        "parent_stage_id": active_check.stage_id,
+                        "build_index": active_check.build_index,
+                    }
+                )
+            await emit_stage(stage)
 
-        Этапы ядра (``validate``, TLC, разбор) приходят отдельным callback'ом в
-        сам движок — это задача backend (Б10); граф передаёт только модель и
-        свойство, как требует его контракт.
-        """
-        outcome = await checker.check(model, prop)
+        outcome = await checker.check(model, prop, emit_stage=emit_core)
         for stored in store.save_run(
             str(context.verification_id),
             [
@@ -230,19 +261,37 @@ async def _run_agent_iteration(
         )
 
     settings = LLMSettings.from_env()
-    limits = CycleLimits(
-        build_attempts=settings.max_attempts,
-        max_rebuilds=MAX_REBUILDS,
-        explanation_attempts=settings.max_attempts,
-    )
-    generation = generation_profile(
-        settings,
-        build_attempts=limits.build_attempts,
-        max_rebuilds=limits.max_rebuilds,
-        explanation_attempts=limits.explanation_attempts,
-        reasoning=reasoning,
-    )
-    logger.info("прогон %s: профиль генерации %s", identifier, generation.fingerprint())
+
+    async def emit_stage(stage: Stage) -> None:
+        nonlocal active_check
+        if stage.scope == "agent" and stage.name == "check":
+            active_check = stage if stage.state == "RUNNING" else None
+        async with session_scope(sessionmaker) as session:
+            if stage.state == StageState.RUNNING:
+                await _ensure_not_cancelled(session, identifier)
+            await runs.append_event(
+                session,
+                identifier,
+                "stage.statistics" if stage.statistics else "stage.updated",
+                stage_event_data(stage),
+                stage.stage_id,
+            )
+            if stage.scope == "agent" and stage.reason_code in {
+                "GATE_REJECTED",
+                "MODEL_INTERPRETATION_ERROR",
+            }:
+                await runs.append_event(
+                    session,
+                    identifier,
+                    "agent.rebuild",
+                    {
+                        "from_build_index": stage.build_index,
+                        "to_build_index": stage.build_index + 1,
+                        "reason_code": stage.reason_code,
+                        "message": "Агент перестраивает модель после замечаний",
+                    },
+                )
+
     iteration = await run_iteration(
         client=client,
         requirement_text=context.requirement_text,
@@ -251,7 +300,6 @@ async def _run_agent_iteration(
         on_model=on_model,
         reasoning=reasoning,
         emit_stage=emit_stage,
-        generation=generation,
     )
 
     if artifacts:
@@ -294,7 +342,7 @@ async def check_behavior(ctx: dict[str, Any], verification_id: str) -> str:
     identifier = uuid.UUID(verification_id)
     sessions = ctx[_SESSIONS_KEY]
     try:
-        return await _check_and_save(ctx, identifier)
+        return await _run_cancellable(sessions, identifier, _check_and_save(ctx, identifier))
     except CheckBehaviorError:
         raise
     except (asyncio.CancelledError, TimeoutError):
@@ -315,14 +363,28 @@ async def _check_and_save(ctx: dict[str, Any], identifier: uuid.UUID) -> str:
     checker: ModelChecker = ctx[_ENGINE_KEY]
     store: LocalArtifactStore = ctx[_STORE_KEY]
 
-    await _check_run_is_pending(sessionmaker, identifier)
+    existing = await _check_run_is_pending(sessionmaker, identifier)
+    if existing is not None:
+        return existing
 
     try:
         run = await load_run_context(sessionmaker, identifier)
     except VerificationNotFoundError as missing:
         raise CheckBehaviorError(str(missing)) from missing
 
-    result = await _check_model(sessionmaker, checker, store, run)
+    async def emit_core(stage: Stage) -> None:
+        async with session_scope(sessionmaker) as session:
+            if stage.state == StageState.RUNNING:
+                await _ensure_not_cancelled(session, identifier)
+            await runs.append_event(
+                session,
+                identifier,
+                "stage.statistics" if stage.statistics else "stage.updated",
+                stage_event_data(stage),
+                stage.stage_id,
+            )
+
+    result = await _check_model(sessionmaker, checker, store, run, emit_core)
     result, explanation = await _explain(ctx, run, result)
     try:
         await save_result(sessionmaker, run, result, explanation)
@@ -340,7 +402,7 @@ async def _check_and_save(ctx: dict[str, Any], identifier: uuid.UUID) -> str:
 
 async def _check_run_is_pending(
     sessionmaker: async_sessionmaker[AsyncSession], verification_id: uuid.UUID
-) -> None:
+) -> str | None:
     """Отказаться от прогона, который уже не находится в статусе ``PENDING``.
 
     Задача становится идемпотентной: повторная постановка после сбоя или свип
@@ -350,12 +412,152 @@ async def _check_run_is_pending(
         CheckBehaviorError: если строки прогона нет — сохранять результат некуда.
     """
     async with session_scope(sessionmaker) as session:
-        row = await session.get(Verification, verification_id)
+        row = await session.scalar(
+            select(Verification).where(Verification.id == verification_id).with_for_update()
+        )
         if row is None:
             raise CheckBehaviorError(f"прогон {verification_id} не найден")
         if row.status != VerificationStatus.PENDING:
             logger.info("прогон %s пропущен: статус %s уже записан", verification_id, row.status)
-            raise CheckBehaviorError(f"прогон {verification_id} уже завершён статусом {row.status}")
+            return str(row.status)
+        if row.execution_status != "QUEUED":
+            raise CheckBehaviorError(f"прогон {verification_id} уже выполняется или отменяется")
+        row.execution_status = "RUNNING"
+        row.started_at = datetime.now().astimezone()
+        row.last_event_seq += 1
+        session.add(
+            VerificationEvent(
+                id=uuid.uuid4(),
+                verification_id=row.id,
+                seq=row.last_event_seq,
+                type="run.updated",
+                stage_id=None,
+                data={"execution_status": "RUNNING", "status": "PENDING"},
+                occurred_at=row.started_at,
+            )
+        )
+    return None
+
+
+async def _ensure_not_cancelled(session: AsyncSession, verification_id: uuid.UUID) -> None:
+    """Проверить отмену до запуска следующего этапа."""
+    state = await session.scalar(
+        select(Verification.execution_status)
+        .where(Verification.id == verification_id)
+        .with_for_update()
+    )
+    if state in {"CANCELLING", "CANCELLED"}:
+        raise asyncio.CancelledError()
+
+
+async def _run_cancellable(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    verification_id: uuid.UUID,
+    work: Any,
+) -> str:
+    """Следить за запросом отмены, пока локальная задача выполняется."""
+    task = asyncio.create_task(work)
+    try:
+        while not task.done():
+            await asyncio.wait({task}, timeout=0.5)
+            if task.done():
+                break
+            async with session_scope(sessionmaker) as session:
+                state = await session.scalar(
+                    select(Verification.execution_status).where(Verification.id == verification_id)
+                )
+            if state == "CANCELLING":
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+                await _finish_cancelled(sessionmaker, verification_id)
+                return "CANCELLED"
+        async with session_scope(sessionmaker) as session:
+            state = await session.scalar(
+                select(Verification.execution_status).where(Verification.id == verification_id)
+            )
+        if state == "CANCELLING":
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            await _finish_cancelled(sessionmaker, verification_id)
+            return "CANCELLED"
+        return await task
+    except asyncio.CancelledError:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        raise
+
+
+async def _finish_cancelled(
+    sessionmaker: async_sessionmaker[AsyncSession], verification_id: uuid.UUID
+) -> None:
+    async with session_scope(sessionmaker) as session:
+        row = await session.scalar(
+            select(Verification).where(Verification.id == verification_id).with_for_update()
+        )
+        if row is None or row.execution_status != "CANCELLING":
+            return
+        row.execution_status = "CANCELLED"
+        row.status = "CANCELLED"
+        row.counterexample = None
+        row.question = None
+        row.root_cause = None
+        row.business_summary = "Анализ отменён пользователем"
+        row.finished_at = datetime.now().astimezone()
+        events = list(
+            await session.scalars(
+                select(VerificationEvent)
+                .where(
+                    VerificationEvent.verification_id == row.id,
+                    VerificationEvent.stage_id.is_not(None),
+                )
+                .order_by(VerificationEvent.seq.desc())
+            )
+        )
+        seen: set[str] = set()
+        for event in events:
+            if event.stage_id in seen:
+                continue
+            seen.add(event.stage_id)
+            snapshot = event.data.get("stage")
+            if snapshot is None or snapshot.get("state") != "RUNNING":
+                continue
+            stage = Stage.model_validate(snapshot)
+            closed = stage.model_copy(
+                update={
+                    "state": StageState.CANCELLED,
+                    "finished_at": row.finished_at,
+                    "duration_ms": max(
+                        0, int((row.finished_at - stage.started_at).total_seconds() * 1000)
+                    ),
+                    "reason_code": "CANCEL_REQUESTED",
+                }
+            )
+            row.last_event_seq += 1
+            session.add(
+                VerificationEvent(
+                    id=uuid.uuid4(),
+                    verification_id=row.id,
+                    seq=row.last_event_seq,
+                    type="stage.updated",
+                    stage_id=stage.stage_id,
+                    data=stage_event_data(closed),
+                    occurred_at=row.finished_at,
+                )
+            )
+        row.last_event_seq += 1
+        session.add(
+            VerificationEvent(
+                id=uuid.uuid4(),
+                verification_id=row.id,
+                seq=row.last_event_seq,
+                type="run.finished",
+                stage_id=None,
+                data={"execution_status": "CANCELLED", "status": "CANCELLED"},
+                occurred_at=row.finished_at,
+            )
+        )
 
 
 async def _finalize_crashed(
@@ -416,6 +618,7 @@ async def _check_model(
     checker: ModelChecker,
     store: LocalArtifactStore,
     run: RunContext,
+    emit_stage=None,
 ) -> VerificationResult:
     """Прогнать движок по каждому свойству, сохранить артефакты и свести результаты."""
     try:
@@ -427,7 +630,9 @@ async def _check_model(
             error_detail=f"документ модели не прошёл валидацию: {invalid}",
         )
 
-    outcomes = [await checker.check(model, prop) for prop in model.properties]
+    outcomes = [
+        await checker.check(model, prop, emit_stage=emit_stage) for prop in model.properties
+    ]
     stored = store.save_run(
         str(run.verification_id),
         [
@@ -505,6 +710,20 @@ async def _sweep_pending(ctx: dict[str, Any]) -> int:
     # Прогоны без активной задачи: их можно перевставить или закрыть.
     handled = 0
     horizon = datetime.now().astimezone() - timedelta(seconds=_SWEEP_MIN_AGE_SECONDS)
+    async with session_scope(sessions) as session:
+        cancelling = list(
+            await session.scalars(
+                select(Verification).where(
+                    Verification.execution_status == "CANCELLING",
+                    Verification.created_at <= horizon,
+                )
+            )
+        )
+    for row in cancelling:
+        job_status = await _job_status(pool, str(row.id))
+        if job_status not in (JobStatus.queued, JobStatus.in_progress, JobStatus.deferred):
+            await _finish_cancelled(sessions, row.id)
+            handled += 1
     for row in await _pending_rows(sessions, horizon):
         job_id = str(row.id)
         job_status = await _job_status(pool, job_id)
@@ -530,6 +749,7 @@ async def _pending_rows(
     async with session_scope(sessionmaker) as session:
         statement = select(Verification).where(
             Verification.status == VerificationStatus.PENDING,
+            Verification.execution_status.in_(("QUEUED", "RUNNING")),
             Verification.created_at <= older_than,
         )
         return list((await session.scalars(statement)).all())

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import analysis, auth, profile, projects
+from app.api import analysis, auth, profile, projects, requirement_imports
 from app.db import dispose_engine, open_database
 from app.errors import install_exception_handlers
 from app.queue import close_queue, open_queue
@@ -32,7 +32,7 @@ app = FastAPI(
 
 install_exception_handlers(app)
 
-for router in (auth.router, projects.router, analysis.router, profile.router):
+for router in (auth.router, projects.router, requirement_imports.router, analysis.router, profile.router):
     app.include_router(router, prefix=API_PREFIX)
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from enum import StrEnum
 from typing import Annotated, Any
 
@@ -37,6 +38,7 @@ class VerificationStatus(StrEnum):
     STATE_LIMIT_REACHED = "STATE_LIMIT_REACHED"
     ENGINE_ERROR = "ENGINE_ERROR"
     AGENT_ERROR = "AGENT_ERROR"
+    CANCELLED = "CANCELLED"
 
 
 class RootCause(StrEnum):
@@ -122,6 +124,9 @@ class RelatedRequirement(WireModel):
 
     paragraph_ref: str | None = None
     quote: str | None = None
+    requirement_id: uuid.UUID | None = None
+    start: int | None = Field(default=None, ge=0)
+    end: int | None = Field(default=None, ge=0)
 
 
 class VerificationResult(WireModel):

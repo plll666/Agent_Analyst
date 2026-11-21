@@ -22,4 +22,5 @@ dist/
 .DS_Store
 logs/
 var/
+backend/data/
 *.log

@@ -14,12 +14,14 @@ from sqlalchemy import (
     MetaData,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.domain.execution import ExecutionStatus
 from app.domain.verification import ROOT_CAUSES, VerificationStatus
 
 NAMING_CONVENTION = {
@@ -31,6 +33,8 @@ NAMING_CONVENTION = {
 }
 
 VERIFICATION_STATUSES = tuple(str(status) for status in VerificationStatus)
+EXECUTION_STATUSES = tuple(str(state) for state in ExecutionStatus)
+IMPORT_FORMATS = ("txt", "docx")
 
 
 class Base(DeclarativeBase):
@@ -67,6 +71,37 @@ class Project(Base):
     __table_args__ = (Index("ix_projects_owner_id", "owner_id"),)
 
 
+class RequirementImport(Base):
+    """Загруженный файл требования: извлечённый текст и фрагменты.
+
+    Импорт — не версия требования: он лишь предпросмотр. Версию создаёт
+    пользователь, подтвердив текст (``requirements.source_import_id``).
+    """
+
+    __tablename__ = "requirement_imports"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
+    filename: Mapped[str] = mapped_column(String(255))
+    format: Mapped[str] = mapped_column(String(8))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    sha256: Mapped[str] = mapped_column(CHAR(64))
+    raw_text: Mapped[str] = mapped_column(Text)
+    fragments: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    warnings: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
+    # Ссылка на файл в локальном хранилище; наружу не выдаётся.
+    storage_uri: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("format IN ('txt', 'docx')", name="ck_requirement_imports_format"),
+        Index("ix_requirement_imports_project_created", "project_id", text("created_at DESC")),
+    )
+
+
 class Requirement(Base):
     __tablename__ = "requirements"
 
@@ -76,6 +111,14 @@ class Requirement(Base):
     raw_text: Mapped[str] = mapped_column(Text)
     paragraph_ref: Mapped[str | None] = mapped_column(String(64))
     is_current: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # Происхождение текста: из какого импорта подтверждён и менялся ли он
+    # относительно извлечённого. ``fragments`` — фрагменты именно этой версии,
+    # по ним подсвечиваются цитаты агента.
+    source_import_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("requirement_imports.id", ondelete="SET NULL")
+    )
+    source_modified: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    fragments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -128,12 +171,31 @@ class Verification(Base):
     root_cause: Mapped[str | None] = mapped_column(String(32))
     reasoning: Mapped[bool | None] = mapped_column(Boolean)
     model_auto_edited: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # Состояние выполнения отдельно от логического результата: пока задача
+    # стоит в очереди или работает, ``status = PENDING``, а ``execution_status``
+    # показывает, что сейчас происходит (контракт спринта 3, раздел 4).
+    execution_status: Mapped[str] = mapped_column(
+        String(16), server_default=text("'QUEUED'"), comment="QUEUED/RUNNING/CANCELLING/COMPLETED/FAILED/CANCELLED"
+    )
+    input_key: Mapped[str | None] = mapped_column(
+        String(71), comment="sha256:... зафиксированного входа; NULL у старых прогонов"
+    )
+    run_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_event_seq: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         CheckConstraint(
             "status IN (" + ", ".join(f"'{s}'" for s in VERIFICATION_STATUSES) + ")",
             name="ck_verifications_status",
+        ),
+        CheckConstraint(
+            "execution_status IN ("
+            + ", ".join(f"'{s}'" for s in EXECUTION_STATUSES)
+            + ")",
+            name="ck_verifications_execution_status",
         ),
         CheckConstraint("model_auto_edited = false", name="ck_verifications_model_auto_edited"),
         CheckConstraint(
@@ -146,6 +208,35 @@ class Verification(Base):
         Index("ix_verifications_model_version_id", "model_version_id"),
         Index("ix_verifications_requirement_id", "requirement_id"),
         Index("ix_verifications_project_property", "project_id", "property_id"),
+        Index("ix_verifications_project_input_key", "project_id", "input_key"),
+    )
+
+
+class VerificationEvent(Base):
+    """Сохранённое событие этапа или состояния прогона.
+
+    Источник истины для истории и для SSE: ``seq`` монотонен в пределах
+    прогона, поэтому повторная доставка определяется парой
+    ``(verification_id, seq)`` и не создаёт дублей на фронте.
+    """
+
+    __tablename__ = "verification_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    verification_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("verifications.id", ondelete="CASCADE")
+    )
+    seq: Mapped[int] = mapped_column(Integer)
+    type: Mapped[str] = mapped_column(String(32))
+    # Идентификатор этапа для событий stage.*; пусто у событий состояния прогона.
+    stage_id: Mapped[str | None] = mapped_column(String(128))
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("verification_id", "seq", name="uq_verification_events_run_seq"),
+        Index("ix_verification_events_run_seq", "verification_id", "seq"),
+        Index("ix_verification_events_run_stage", "verification_id", "stage_id"),
     )
 
 

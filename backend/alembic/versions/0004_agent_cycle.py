@@ -38,13 +38,12 @@ STATUSES = (
 def upgrade() -> None:
     """Разрешить прогон без модели и добавить статус ошибки агента.
 
-    Ограничение пересоздаётся прямым SQL: имя ``ck_verifications_status`` уже
-    занято в базе, а ``op.create_check_constraint`` переписывает имя по
-    соглашению именования и искал бы другое.
+    Используем физическое имя из 0001: соглашение именования добавляет
+    ``ck_verifications_`` к явно заданному ``ck_verifications_status``.
     """
-    op.execute("ALTER TABLE verifications DROP CONSTRAINT ck_verifications_status")
+    op.execute("ALTER TABLE verifications DROP CONSTRAINT ck_verifications_ck_verifications_status")
     op.execute(
-        "ALTER TABLE verifications ADD CONSTRAINT ck_verifications_status CHECK ("
+        "ALTER TABLE verifications ADD CONSTRAINT ck_verifications_ck_verifications_status CHECK ("
         + "status IN (" + ", ".join(f"'{status}'" for status in STATUSES) + ")"
         + ")"
     )
@@ -69,9 +68,9 @@ def downgrade() -> None:
         existing_type=sa.Uuid(as_uuid=True),
         nullable=False,
     )
-    op.execute("ALTER TABLE verifications DROP CONSTRAINT ck_verifications_status")
+    op.execute("ALTER TABLE verifications DROP CONSTRAINT ck_verifications_ck_verifications_status")
     op.execute(
-        "ALTER TABLE verifications ADD CONSTRAINT ck_verifications_status CHECK ("
+        "ALTER TABLE verifications ADD CONSTRAINT ck_verifications_ck_verifications_status CHECK ("
         + "status IN (" + ", ".join(f"'{status}'" for status in STATUSES[:-1]) + ")"
         + ")"
     )

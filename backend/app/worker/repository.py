@@ -262,6 +262,12 @@ async def save_result(
         VerificationNotFoundError: если строка прогона исчезла.
     """
     async with session_scope(sessionmaker) as session:
+        verification = await session.get(Verification, run.verification_id)
+        requirement = (
+            await session.get(Requirement, verification.requirement_id)
+            if verification is not None and verification.requirement_id
+            else None
+        )
         saved = await runs.save_result(
             session,
             run.verification_id,
@@ -272,7 +278,7 @@ async def save_result(
             engine_version=result.engine_version,
             statistics=_jsonable(result.statistics),
             counterexample=_jsonable(result.counterexample),
-            related_requirements=_related_json(result.related_requirements),
+            related_requirements=_related_json(result.related_requirements, requirement),
             duration_ms=result.duration_ms,
             error_detail=result.error_detail,
             hypothesis=explanation.hypothesis,
@@ -319,11 +325,41 @@ async def save_artifact_rows(
 
 def _related_json(
     requirements: tuple[RelatedRequirement, ...] | None,
+    source: Requirement | None = None,
 ) -> list[dict[str, Any]] | None:
     """Разложить ссылки на требования по элементам JSONB."""
     if requirements is None:
         return None
-    return [requirement.model_dump(mode="json") for requirement in requirements]
+    linked = []
+    for item in requirements:
+        value = item.model_dump(mode="json")
+        value.update(
+            {"requirement_id": str(source.id) if source else None, "start": None, "end": None}
+        )
+        if source is not None and item.quote:
+            matches = []
+            offset = 0
+            while (found := source.raw_text.find(item.quote, offset)) >= 0:
+                matches.append(found)
+                offset = found + 1
+            if len(matches) == 1:
+                value["start"] = matches[0]
+                value["end"] = matches[0] + len(item.quote)
+            elif item.paragraph_ref:
+                for fragment in source.fragments or []:
+                    if fragment["id"] == item.paragraph_ref:
+                        within = [
+                            start
+                            for start in matches
+                            if fragment["start"] <= start
+                            and start + len(item.quote) <= fragment["end"]
+                        ]
+                        if len(within) == 1:
+                            value["start"] = within[0]
+                            value["end"] = within[0] + len(item.quote)
+                        break
+        linked.append(value)
+    return linked
 
 
 def _jsonable(value: Any) -> Any:

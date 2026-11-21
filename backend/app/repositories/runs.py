@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.models import Artifact, ModelVersion, Project, Verification
+from app.database.models import Artifact, ModelVersion, Project, Verification, VerificationEvent
 from app.domain.verification import (
     Counterexample,
     RelatedRequirement,
@@ -146,6 +146,8 @@ async def create_pending_verification(
     engine: str,
     requirement_id: uuid.UUID | None = None,
     reasoning: bool | None = None,
+    input_key: str | None = None,
+    run_config: dict[str, Any] | None = None,
 ) -> Verification:
     """Завести прогон в статусе ``PENDING``; ``business_summary`` пока пуст.
 
@@ -164,6 +166,9 @@ async def create_pending_verification(
         status="PENDING",
         engine=engine,
         reasoning=reasoning,
+        input_key=input_key,
+        run_config=run_config,
+        execution_status="QUEUED",
         business_summary="",
         created_at=datetime.now().astimezone(),
     )
@@ -204,6 +209,34 @@ async def get_verification(
     return await session.get(Verification, verification_id)
 
 
+async def append_event(
+    session: AsyncSession,
+    verification_id: uuid.UUID,
+    event_type: str,
+    data: dict[str, Any],
+    stage_id: str | None = None,
+) -> VerificationEvent | None:
+    """Атомарно назначить номер событию внутри прогона."""
+    record = await session.scalar(
+        select(Verification).where(Verification.id == verification_id).with_for_update()
+    )
+    if record is None or record.execution_status in {"COMPLETED", "FAILED", "CANCELLED"}:
+        return None
+    record.last_event_seq += 1
+    event = VerificationEvent(
+        id=uuid.uuid4(),
+        verification_id=verification_id,
+        seq=record.last_event_seq,
+        type=event_type,
+        stage_id=stage_id,
+        data=data,
+        occurred_at=datetime.now().astimezone(),
+    )
+    session.add(event)
+    await session.flush()
+    return event
+
+
 async def save_result(
     session: AsyncSession,
     verification_id: uuid.UUID,
@@ -223,8 +256,12 @@ async def save_result(
     root_cause: str | None = None,
 ) -> Verification | None:
     """Записать результат проверки в строку прогона."""
-    record = await get_verification(session, verification_id)
+    record = await session.scalar(
+        select(Verification).where(Verification.id == verification_id).with_for_update()
+    )
     if record is None:
+        return None
+    if record.execution_status in {"CANCELLING", "CANCELLED", "COMPLETED", "FAILED"}:
         return None
 
     record.status = status
@@ -240,6 +277,22 @@ async def save_result(
     record.hypothesis = hypothesis
     record.question = question
     record.root_cause = root_cause
+    record.execution_status = (
+        "COMPLETED" if status in {"PROPERTY_HOLDS", "PROPERTY_VIOLATED"} else "FAILED"
+    )
+    record.finished_at = datetime.now().astimezone()
+    record.last_event_seq += 1
+    session.add(
+        VerificationEvent(
+            id=uuid.uuid4(),
+            verification_id=record.id,
+            seq=record.last_event_seq,
+            type="run.finished",
+            stage_id=None,
+            data={"execution_status": record.execution_status, "status": record.status},
+            occurred_at=record.finished_at,
+        )
+    )
 
     await session.flush()
     return record

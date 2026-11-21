@@ -6,6 +6,7 @@ from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import Project, Requirement
+from app.domain.importing import rebuild_fragments
 
 
 async def create(
@@ -83,6 +84,9 @@ async def add_requirement_version(
     *,
     raw_text: str,
     created_by: uuid.UUID | None = None,
+    source_import_id: uuid.UUID | None = None,
+    source_modified: bool = False,
+    fragments: list[dict] | None = None,
 ) -> Requirement | None:
     """Добавить версию требования и сделать её текущей.
 
@@ -108,6 +112,9 @@ async def add_requirement_version(
         project_id=project_id,
         version=next_version,
         raw_text=raw_text,
+        source_import_id=source_import_id,
+        source_modified=source_modified,
+        fragments=fragments if fragments is not None else [item.model_dump() for item in rebuild_fragments(raw_text)],
         is_current=True,
         created_by=created_by,
         created_at=datetime.now().astimezone(),
