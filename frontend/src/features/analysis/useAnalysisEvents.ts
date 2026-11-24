@@ -29,13 +29,16 @@ export function useAnalysisEvents(projectId: string, verification: Verification 
 
   useEffect(() => {
     setLiveEvents([])
+  }, [verificationId])
+
+  useEffect(() => {
     setStreamState(active ? 'connecting' : 'offline')
   }, [verificationId, active])
 
   const savedQuery = useQuery({
     queryKey: queryKeys.analysisEvents(projectId, verificationId),
     queryFn: () => fetchAnalysisEvents(projectId, verificationId),
-    enabled: projectId !== '' && verificationId !== '' && active,
+    enabled: projectId !== '' && verificationId !== '',
     refetchInterval: active ? 3000 : false,
     retry: false,
   })
@@ -60,6 +63,9 @@ export function useAnalysisEvents(projectId: string, verification: Verification 
         })
         if (parsed.type === 'run.finished') {
           void queryClient.invalidateQueries({ queryKey: queryKeys.verifications(projectId) })
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.analysisEvents(projectId, verificationId),
+          })
         }
       } catch {
         // Битое событие не должно ронять разбор остальных: пропускаем его молча.

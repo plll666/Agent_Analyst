@@ -5,6 +5,7 @@ import type { AnalysisStage, Verification } from '../../types/api'
 const STAGE_LABELS: Record<string, string> = {
   build: 'Построение модели',
   gate: 'Проверки модели',
+  audit: 'Независимая проверка покрытия',
   check: 'Проверка свойств',
   explain: 'Объяснение результата',
   validate: 'Валидация модели',
@@ -73,6 +74,23 @@ function StageRow({ stage, now }: { stage: AnalysisStage; now: number }) {
   )
 }
 
+export function AnalysisStageList({ stages }: { stages: AnalysisStage[] }) {
+  const hasRunning = stages.some((stage) => stage.state === 'RUNNING')
+  const now = useNow(hasRunning)
+
+  if (stages.length === 0) {
+    return <p className="text-xs text-subtle">Сохранённых этапов для этого прогона нет.</p>
+  }
+
+  return (
+    <ol className="flex flex-col">
+      {stages.map((stage) => (
+        <StageRow key={stage.stage_id} stage={stage} now={now} />
+      ))}
+    </ol>
+  )
+}
+
 export interface AnalysisProgressProps {
   verification: Verification
   stages: AnalysisStage[]
@@ -90,8 +108,6 @@ export function AnalysisProgress({
 }: AnalysisProgressProps) {
   const state = verification.execution_status
   const isActive = state === 'QUEUED' || state === 'RUNNING' || state === 'CANCELLING'
-  const hasRunning = stages.some((stage) => stage.state === 'RUNNING')
-  const now = useNow(hasRunning)
   return (
     <section
       aria-live="polite"
@@ -127,11 +143,7 @@ export function AnalysisProgress({
             : 'Ожидаем первое событие от сервера.'}
         </p>
       ) : (
-        <ol className="flex flex-col">
-          {stages.map((stage) => (
-            <StageRow key={stage.stage_id} stage={stage} now={now} />
-          ))}
-        </ol>
+        <AnalysisStageList stages={stages} />
       )}
     </section>
   )

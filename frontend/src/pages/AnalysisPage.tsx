@@ -86,9 +86,9 @@ export function AnalysisPage() {
   const currentRequirement = requirements.find((requirement) => requirement.is_current) ?? null
   const canAnalyze = currentRequirement !== null
   const isStarting = startMutation.isPending
+  const reasoningCapability = capabilitiesQuery.data?.reasoning
   const reasoningChoice =
-    capabilitiesQuery.data?.reasoning.available === true &&
-    !capabilitiesQuery.data.reasoning.always_on
+    reasoningCapability?.available !== false && !reasoningCapability?.always_on
   const selectedVerification =
     verifications.find((verification) => verification.id === selectedVerificationId) ??
     verifications.at(0) ??
@@ -462,7 +462,13 @@ export function AnalysisPage() {
               </div>
             ) : null}
 
-            <VerificationDetails verification={selectedVerification} modelVersion={viewedModel} />
+            <VerificationDetails
+              verification={selectedVerification}
+              modelVersion={viewedModel}
+              stages={analysisEvents.stages}
+              stagesLoading={analysisEvents.isLoading}
+              stagesUnavailable={analysisEvents.isUnavailable}
+            />
           </div>
         ) : null}
       </div>

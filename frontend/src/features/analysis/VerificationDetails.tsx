@@ -1,6 +1,7 @@
 import { Badge } from '../../components/Badge'
 import { formatDateTime, formatDuration } from '../../lib/format'
-import type { ModelVersion, Verification } from '../../types/api'
+import type { AnalysisStage, ModelVersion, Verification } from '../../types/api'
+import { AnalysisStageList } from './AnalysisProgress'
 import { CounterexampleSteps } from './CounterexampleSteps'
 import { ModelView } from './ModelView'
 import { PROPERTY_TYPE_LABELS } from './verificationStatus'
@@ -10,9 +11,18 @@ const SECTION_TITLE_CLASS = 'eyebrow'
 export interface VerificationDetailsProps {
   verification: Verification
   modelVersion: ModelVersion | null
+  stages: AnalysisStage[]
+  stagesLoading: boolean
+  stagesUnavailable: boolean
 }
 
-export function VerificationDetails({ verification, modelVersion }: VerificationDetailsProps) {
+export function VerificationDetails({
+  verification,
+  modelVersion,
+  stages,
+  stagesLoading,
+  stagesUnavailable,
+}: VerificationDetailsProps) {
   const { statistics } = verification
 
   return (
@@ -102,6 +112,17 @@ export function VerificationDetails({ verification, modelVersion }: Verification
               {verification.error_detail}
             </p>
           </div>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3 rounded-card border border-line bg-raised/20 p-5">
+        <h3 className={SECTION_TITLE_CLASS}>Этапы выполнения</h3>
+        {stagesLoading ? (
+          <p className="text-xs text-subtle">Загружаем сохранённые этапы…</p>
+        ) : stagesUnavailable ? (
+          <p className="text-xs text-subtle">Не удалось загрузить историю этапов.</p>
+        ) : (
+          <AnalysisStageList stages={stages} />
         )}
       </section>
 

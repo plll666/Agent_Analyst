@@ -51,11 +51,25 @@ def quote_issue(requirement_text: str, quote: str) -> str | None:
     fragment = normalize(quote)
     if len(fragment) < MIN_QUOTE_LENGTH:
         return f"цитата слишком короткая: минимум {MIN_QUOTE_LENGTH} символов"
-    if len(fragment.split()) < MIN_QUOTE_WORDS:
+    if len(fragment.split()) < MIN_QUOTE_WORDS and not _is_numbered_heading_quote(
+        requirement_text, fragment
+    ):
         return f"цитата должна содержать минимум {MIN_QUOTE_WORDS} слова"
     if not _contains_at_word_boundaries(normalize(requirement_text), fragment):
         return "цитата не встречается в тексте требования"
     return None
+
+
+def _is_numbered_heading_quote(requirement_text: str, fragment: str) -> bool:
+    """Разрешить точное название пункта, если оно стоит отдельно после номера."""
+    for line in requirement_text.splitlines():
+        parts = normalize(line).split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        number = parts[0].rstrip(".)")
+        if number.isdecimal() and parts[1] == fragment:
+            return True
+    return False
 
 
 def _contains_at_word_boundaries(text: str, fragment: str) -> bool:
