@@ -12,6 +12,11 @@ export function CounterexampleSteps({ counterexample }: CounterexampleStepsProps
     <ol className="flex flex-col gap-1.5">
       {counterexample.steps.map((step, index) => {
         const isViolating = index === lastIndex
+        const previous = counterexample.steps[index - 1]?.state
+        const changes =
+          previous === undefined
+            ? []
+            : Object.entries(step.state).filter(([key, value]) => previous[key] !== value)
 
         return (
           <li
@@ -39,6 +44,14 @@ export function CounterexampleSteps({ counterexample }: CounterexampleStepsProps
             >
               {formatState(step.state)}
             </span>
+            {changes.length > 0 ? (
+              <span className="text-micro text-subtle @2xl:col-start-3">
+                Изменилось:{' '}
+                {changes
+                  .map(([key, value]) => `${key}: ${String(previous?.[key])} → ${String(value)}`)
+                  .join(' · ')}
+              </span>
+            ) : null}
           </li>
         )
       })}

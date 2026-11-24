@@ -7,8 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
-from app.database.models import Project, Requirement, User
+from app.config import get_settings
+from app.database.models import Project, Requirement, RequirementImport, User
 from app.db import get_session
+from app.domain.importing import rebuild_fragments
 from app.errors import FORBIDDEN, NOT_FOUND, ApiError
 from app.repositories import projects
 
@@ -22,6 +24,7 @@ class ProjectIn(BaseModel):
 
 class RequirementIn(BaseModel):
     raw_text: str = Field(min_length=1)
+    source_import_id: uuid.UUID | None = None
 
 
 class ProjectOut(BaseModel):
@@ -39,6 +42,9 @@ class RequirementOut(BaseModel):
     raw_text: str
     is_current: bool
     created_at: str
+    source_import_id: str | None = None
+    source_modified: bool = False
+    fragments: list[dict] = Field(default_factory=list)
 
 
 def _project_out(project: Project) -> ProjectOut:
@@ -59,6 +65,11 @@ def _requirement_out(requirement: Requirement) -> RequirementOut:
         raw_text=requirement.raw_text,
         is_current=requirement.is_current,
         created_at=requirement.created_at.isoformat(),
+        source_import_id=str(requirement.source_import_id)
+        if requirement.source_import_id
+        else None,
+        source_modified=requirement.source_modified,
+        fragments=requirement.fragments or [],
     )
 
 
@@ -159,8 +170,29 @@ async def add_requirement(
 ) -> RequirementOut:
     """Новая версия требования; прежние остаются неизменными."""
     await _owned_project(session, project_id, user)
+    if not payload.raw_text.strip():
+        raise ApiError(422, "VALIDATION_ERROR", "Текст требования не должен быть пустым")
+    if len(payload.raw_text) > get_settings().import_max_text_chars:
+        raise ApiError(422, "TEXT_TOO_LARGE", "Текст требования превышает лимит")
+    source = None
+    if payload.source_import_id is not None:
+        source = await session.get(RequirementImport, payload.source_import_id)
+        if source is None or source.project_id != project_id:
+            raise ApiError(404, NOT_FOUND, "Импорт не найден в этом проекте")
+    modified = source is not None and payload.raw_text != source.raw_text
+    fragments = (
+        source.fragments
+        if source is not None and not modified
+        else [part.model_dump() for part in rebuild_fragments(payload.raw_text)]
+    )
     created = await projects.add_requirement_version(
-        session, project_id, raw_text=payload.raw_text, created_by=user.id
+        session,
+        project_id,
+        raw_text=payload.raw_text,
+        created_by=user.id,
+        source_import_id=source.id if source else None,
+        source_modified=modified,
+        fragments=fragments,
     )
     if created is None:
         raise ApiError(404, NOT_FOUND, "Проект не найден")

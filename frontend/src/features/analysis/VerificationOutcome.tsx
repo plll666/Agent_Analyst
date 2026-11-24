@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { cn } from '../../lib/cn'
 import { formatDateTime } from '../../lib/format'
@@ -106,6 +106,7 @@ function AnswerForm({
 
 export interface VerificationOutcomeProps {
   verification: Verification
+  requirementText?: string | null
   isDetailsOpen: boolean
   onToggleDetails: () => void
   onAnswer?: ((answer: string) => Promise<void>) | undefined
@@ -114,12 +115,15 @@ export interface VerificationOutcomeProps {
 
 export function VerificationOutcome({
   verification,
+  requirementText = null,
   isDetailsOpen,
   onToggleDetails,
   onAnswer,
   isAnswering = false,
 }: VerificationOutcomeProps) {
   const [isStepsOpen, setIsStepsOpen] = useState(false)
+  const [selectedCitation, setSelectedCitation] = useState<number | null>(null)
+  const citationContextRef = useRef<HTMLDivElement>(null)
 
   const meta = verificationMeta(verification)
   const isHolds = verification.status === VERIFICATION_STATUSES.propertyHolds
@@ -234,11 +238,58 @@ export function VerificationOutcome({
                   </span>
                 ) : null}
                 {requirement.quote !== null ? (
-                  <p className="text-sm leading-relaxed text-muted">{requirement.quote}</p>
+                  <button
+                    type="button"
+                    className="text-start text-sm leading-relaxed text-muted hover:text-fg"
+                    onClick={() => {
+                      const index = verification.related_requirements.indexOf(requirement)
+                      setSelectedCitation((current) => (current === index ? null : index))
+                      requestAnimationFrame(() =>
+                        citationContextRef.current?.scrollIntoView({
+                          block: 'nearest',
+                          behavior: 'smooth',
+                        }),
+                      )
+                    }}
+                  >
+                    {requirement.quote}
+                    {requirement.start !== null && requirement.start !== undefined ? (
+                      <span className="ms-2 text-micro text-bone">Показать в тексте</span>
+                    ) : null}
+                  </button>
                 ) : null}
               </li>
             ))}
           </ul>
+          {selectedCitation !== null && requirementText !== null
+            ? (() => {
+                const citation = verification.related_requirements[selectedCitation]
+                const start = citation?.start
+                const end = citation?.end
+                if (
+                  citation === undefined ||
+                  start === null ||
+                  start === undefined ||
+                  end === null ||
+                  end === undefined
+                )
+                  return null
+                const codePoints = Array.from(requirementText)
+                if (start < 0 || end < start || end > codePoints.length) return null
+                return (
+                  <div
+                    ref={citationContextRef}
+                    className="max-h-64 overflow-auto rounded-field border border-line bg-surface p-3 font-mono text-xs leading-relaxed text-muted"
+                  >
+                    {codePoints.slice(0, start).join('')}
+                    <mark className="rounded bg-bone/20 text-fg">
+                      {codePoints.slice(start, end).join('')}
+                    </mark>
+                    {codePoints.slice(end).join('')}
+                  </div>
+                )
+              })()
+            : null}
         </section>
       )}
 

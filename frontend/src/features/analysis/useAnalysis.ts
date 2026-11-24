@@ -6,6 +6,7 @@ import { queryKeys } from '../../lib/queryKeys'
 import type { Verification } from '../../types/api'
 import {
   answerAnalysis,
+  cancelAnalysis,
   fetchLlmCapabilities,
   fetchModelVersions,
   fetchVerifications,
@@ -60,12 +61,22 @@ export function useStartAnalysis(projectId: string) {
 
   return useMutation({
     mutationFn: (payload: StartAnalysisPayload) => startAnalysis(projectId, payload),
-    onSuccess: (verification) => {
+    onSuccess: ({ verification, mode }) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.verifications(projectId) })
       push({
-        tone: 'info',
-        title: 'Анализ запущен',
-        description: 'Агент построит модель и проверит её — статус обновится сам',
+        tone: mode === 'REUSED' ? 'success' : 'info',
+        title:
+          mode === 'REUSED'
+            ? 'Показан сохранённый результат'
+            : mode === 'IN_PROGRESS'
+              ? 'Открыт текущий прогон'
+              : 'Анализ запущен',
+        description:
+          mode === 'REUSED'
+            ? 'Для этой версии требования и настроек уже есть завершённый результат'
+            : mode === 'IN_PROGRESS'
+              ? 'Повторная задача не создавалась'
+              : 'Агент построит модель и проверит её — статус обновится сам',
       })
       return verification
     },
@@ -73,6 +84,24 @@ export function useStartAnalysis(projectId: string) {
       push({
         tone: 'danger',
         title: 'Анализ не запущен',
+        description: toUserMessage(error),
+      })
+    },
+  })
+}
+
+export function useCancelAnalysis(projectId: string) {
+  const queryClient = useQueryClient()
+  const { push } = useToast()
+  return useMutation({
+    mutationFn: (verificationId: string) => cancelAnalysis(projectId, verificationId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.verifications(projectId) })
+    },
+    onError: (error) => {
+      push({
+        tone: 'danger',
+        title: 'Не удалось отменить анализ',
         description: toUserMessage(error),
       })
     },

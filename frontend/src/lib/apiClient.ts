@@ -81,3 +81,30 @@ export const apiRequest = async <T>(
     throw new DecodeError('Ответ сервера не соответствует контракту')
   }
 }
+
+export const apiUpload = async <T>(path: string, file: File, decode: Decoder<T>): Promise<T> => {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: HTTP_METHODS.post,
+    credentials: 'include',
+    body: (() => {
+      const data = new FormData()
+      data.append('file', file)
+      return data
+    })(),
+  })
+
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null)
+    const detail = decodeApiErrorDetail(payload)
+    if (response.status === 401) sessionExpiredHandler?.()
+    throw new ApiError(response.status, detail.code, detail.message)
+  }
+
+  const payload: unknown = await response.json().catch(() => null)
+  try {
+    return decode(payload)
+  } catch (error) {
+    if (error instanceof DecodeError) throw error
+    throw new DecodeError('Ответ сервера не соответствует контракту')
+  }
+}

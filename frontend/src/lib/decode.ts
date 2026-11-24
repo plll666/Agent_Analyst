@@ -9,6 +9,7 @@ import {
 } from '../types/api'
 import type {
   ApiErrorDetail,
+  AnalysisStage,
   BehavioralModel,
   Effect,
   Expression,
@@ -21,6 +22,8 @@ import type {
   ModelVersion,
   ProfileSummary,
   Project,
+  RequirementFragment,
+  RequirementImport,
   RelatedRequirement,
   Requirement,
   RootCause,
@@ -158,6 +161,49 @@ export const decodeRequirement: Decoder<Requirement> = (value) => {
     version: readNumber(source, 'version'),
     raw_text: readString(source, 'raw_text'),
     is_current: readBoolean(source, 'is_current'),
+    created_at: readString(source, 'created_at'),
+    source_import_id: readNullableString(source, 'source_import_id'),
+    source_modified: source['source_modified'] === true,
+    ...(source['fragments'] === undefined
+      ? {}
+      : { fragments: readArray(source, 'fragments').map(decodeRequirementFragment) }),
+  }
+}
+
+const decodeRequirementFragment = (value: unknown): RequirementFragment => {
+  const source = expectRecord(value)
+  const kind = readString(source, 'kind')
+  if (kind !== 'paragraph' && kind !== 'table_cell') {
+    throw new DecodeError(`Неизвестный тип фрагмента «${kind}»`)
+  }
+  return {
+    id: readString(source, 'id'),
+    kind,
+    start: readNumber(source, 'start'),
+    end: readNumber(source, 'end'),
+    source_locator: readNullableString(source, 'source_locator'),
+  }
+}
+
+export const decodeRequirementImport: Decoder<RequirementImport> = (value) => {
+  const source = expectRecord(value)
+  const format = readString(source, 'format')
+  if (format !== 'txt' && format !== 'docx') {
+    throw new DecodeError(`Неизвестный формат требования «${format}»`)
+  }
+  return {
+    id: readString(source, 'id'),
+    project_id: readString(source, 'project_id'),
+    filename: readString(source, 'filename'),
+    format,
+    size_bytes: readNumber(source, 'size_bytes'),
+    sha256: readString(source, 'sha256'),
+    raw_text: readString(source, 'raw_text'),
+    fragments: readArray(source, 'fragments').map(decodeRequirementFragment),
+    warnings: readArray(source, 'warnings').map((item) => {
+      const warning = expectRecord(item)
+      return { code: readString(warning, 'code'), message: readString(warning, 'message') }
+    }),
     created_at: readString(source, 'created_at'),
   }
 }
@@ -373,6 +419,38 @@ const decodeRelatedRequirement = (value: unknown): RelatedRequirement => {
   return {
     paragraph_ref: readNullableString(source, 'paragraph_ref'),
     quote: readNullableString(source, 'quote'),
+    requirement_id: readNullableString(source, 'requirement_id'),
+    start: typeof source['start'] === 'number' ? source['start'] : null,
+    end: typeof source['end'] === 'number' ? source['end'] : null,
+  }
+}
+
+const decodeStage = (value: unknown): AnalysisStage => {
+  const source = expectRecord(value)
+  const scope = readString(source, 'scope')
+  const state = readString(source, 'state')
+  if (scope !== 'agent' && scope !== 'core') throw new DecodeError('Неизвестная область этапа')
+  if (!['RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED'].includes(state)) {
+    throw new DecodeError(`Неизвестное состояние этапа «${state}»`)
+  }
+  return {
+    stage_id: readString(source, 'stage_id'),
+    parent_stage_id: readNullableString(source, 'parent_stage_id'),
+    scope,
+    name: readString(source, 'name'),
+    state: state as AnalysisStage['state'],
+    build_index: typeof source['build_index'] === 'number' ? source['build_index'] : null,
+    attempt: readNumber(source, 'attempt'),
+    property_id: readNullableString(source, 'property_id'),
+    started_at: readNullableString(source, 'started_at'),
+    finished_at: readNullableString(source, 'finished_at'),
+    duration_ms: typeof source['duration_ms'] === 'number' ? source['duration_ms'] : null,
+    reason_code: readNullableString(source, 'reason_code'),
+    message: readNullableString(source, 'message'),
+    statistics:
+      source['statistics'] === null || source['statistics'] === undefined
+        ? null
+        : decodeStatistics(source['statistics']),
   }
 }
 
@@ -398,7 +476,7 @@ export const decodeVerification: Decoder<Verification> = (value) => {
     throw new DecodeError(`Неизвестный класс причины «${String(rootCause)}»`)
   }
 
-  return {
+  const verification: Verification = {
     id: readString(source, 'id'),
     project_id: readString(source, 'project_id'),
     model_version_id: readNullableString(source, 'model_version_id'),
@@ -429,6 +507,31 @@ export const decodeVerification: Decoder<Verification> = (value) => {
     reasoning: typeof source['reasoning'] === 'boolean' ? source['reasoning'] : null,
     created_at: readString(source, 'created_at'),
   }
+  const activeStages = source['active_stages']
+  if (activeStages !== undefined) {
+    verification.active_stages = readArray(source, 'active_stages').map(decodeStage)
+  }
+  if (typeof source['execution_status'] === 'string') {
+    const executionStatus = source['execution_status']
+    if (
+      ['QUEUED', 'RUNNING', 'CANCELLING', 'COMPLETED', 'FAILED', 'CANCELLED'].includes(
+        executionStatus,
+      )
+    ) {
+      verification.execution_status = executionStatus as NonNullable<
+        Verification['execution_status']
+      >
+    } else {
+      throw new DecodeError(`Неизвестное состояние прогона «${executionStatus}»`)
+    }
+  }
+  if (typeof source['input_key'] === 'string') verification.input_key = source['input_key']
+  verification.started_at = readNullableString(source, 'started_at')
+  verification.finished_at = readNullableString(source, 'finished_at')
+  if (typeof source['last_event_seq'] === 'number') {
+    verification.last_event_seq = source['last_event_seq']
+  }
+  return verification
 }
 
 export const decodeLlmCapabilities: Decoder<LlmCapabilities> = (value) => {

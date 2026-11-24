@@ -24,7 +24,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
-RUN useradd --create-home --uid 10001 aa && chown -R aa:aa /app
+RUN useradd --create-home --uid 10001 aa \
+ && mkdir -p /app/data/requirement-imports \
+ && chown -R aa:aa /app
 
 USER aa
 

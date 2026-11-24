@@ -113,7 +113,8 @@ async def detect_reasoning(
         if own_client:
             await http.aclose()
 
-    _CACHE[key] = (now + _CACHE_TTL_SECONDS, capability)
+    if capability.available is not None:
+        _CACHE[key] = (now + _CACHE_TTL_SECONDS, capability)
     return capability
 
 

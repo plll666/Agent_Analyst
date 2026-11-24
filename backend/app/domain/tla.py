@@ -12,6 +12,7 @@ from app.domain.expressions import (
     Scalar,
     VarExpr,
 )
+from app.domain.tlc_strings import encode_string
 
 MODULE_NAME: Final = "Model"
 INDENT: Final = "  "
@@ -223,5 +224,5 @@ def _literal(value: Scalar) -> str:
         return "TRUE" if value else "FALSE"
     if isinstance(value, int):
         return str(value)
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = encode_string(value).replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'

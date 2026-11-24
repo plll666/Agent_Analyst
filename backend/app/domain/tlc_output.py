@@ -2,6 +2,7 @@ import re
 from typing import Final
 
 from app.domain.expressions import Scalar
+from app.domain.tlc_strings import decode_string
 from app.domain.verification import Counterexample, CounterexampleStep, Statistics
 
 _STATE_HEADER: Final = re.compile(r"^State\s+\d+:\s*(?P<detail>.*)$")
@@ -185,7 +186,7 @@ def _value(raw: str) -> Scalar:
     if text.upper() in {"TRUE", "FALSE"}:
         return text.upper() == "TRUE"
     if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
-        return text[1:-1]
+        return decode_string(text[1:-1])
     if re.fullmatch(r"-?\d+", text):
         return int(text)
     return text

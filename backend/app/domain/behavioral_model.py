@@ -26,7 +26,19 @@ VariableType = Literal["enum", "boolean", "integer"]
 
 PropertyType = Literal["invariant", "forbidden_state", "reachable", "deadlock_free"]
 
+MODEL_SCHEMA_VERSION = "behavioral-model-1"
+"""Версия схемы документа ``BehavioralModel``.
+
+Входит в ключ входа прогона (контракт спринта 3, раздел 3.1). Меняется при
+любом изменении, из-за которого прежний документ перестаёт означать то же
+самое, — не при правке промпта или текста ошибок валидации."""
+
 EXPRESSION_REQUIRED_TYPES = frozenset({"invariant", "forbidden_state", "reachable"})
+
+# Версия схемы документа BehavioralModel: входит в ключ входа прогона
+# (контракт спринта 3, раздел 3.1). Меняется при любом изменении, из-за
+# которого прежний документ перестаёт означать то же самое.
+MODEL_SCHEMA_VERSION = "behavioral-model-1"
 
 _VARIABLE_KIND: Mapping[VariableType, str] = {"enum": "str", "boolean": "bool", "integer": "int"}
 

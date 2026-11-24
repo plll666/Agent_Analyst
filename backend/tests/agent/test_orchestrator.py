@@ -65,13 +65,15 @@ def _uncited_model() -> dict[str, Any]:
     return document
 
 
-async def _violated(_model: BehavioralModel, _prop: Property) -> VerificationResult:
+async def _violated(model: BehavioralModel, prop: Property) -> VerificationResult:
     """Движок нашёл нарушение."""
+    _ = (model, prop)
     return VerificationResult.model_validate(CASE_RESULT_VIOLATED)
 
 
-async def _holds(_model: BehavioralModel, _prop: Property) -> VerificationResult:
+async def _holds(model: BehavioralModel, prop: Property) -> VerificationResult:
     """Движок не нашёл нарушений."""
+    _ = (model, prop)
     return VerificationResult.model_validate(
         {
             "status": "PROPERTY_HOLDS",
